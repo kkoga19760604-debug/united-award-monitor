@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1538426702160461846/w_zf0BwnBk6-zFlFycJErKX9zTSKyjmr_cxthPqMi7mAGXU9uRxEu813SFxPzSG3J8bt")
-SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1gL7HdNzZ4-xa629L7GR20XC-0FJCS93rfp9PCAtKAkk/gviz/tq?tqx=out:csv"
+SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1gL7HdNzZ4-xa629L7GR20XC-0FJCS93rfp9PCAtKAkk/export?format=csv"
 
 def extract_airport_code(text):
     if not text:
@@ -75,13 +75,13 @@ def matches_date_condition(dt, condition_str):
 
 def get_sheet_targets():
     print("📊 スプレッドシートの設定を取得中...")
+    targets = []
     try:
         res = requests.get(SPREADSHEET_CSV_URL, timeout=10)
         res.encoding = 'utf-8'
         reader = csv.reader(io.StringIO(res.text))
         rows = list(reader)
         
-        targets = []
         for i, row in enumerate(rows[1:], start=2):
             if len(row) < 5:
                 continue
@@ -104,11 +104,23 @@ def get_sheet_targets():
                     "cabin": cabin,
                     "note": note
                 })
-        print(f"✅ 対象ルート {len(targets)} 件を読み込みました。")
-        return targets
     except Exception as e:
-        print(f"❌ スプレッドシート読み込みエラー: {e}")
-        return []
+        print(f"⚠️ スプレッドシート取得スキップ: {e}")
+
+    # 万が一シート読み込みが0件だった場合の自動保証設定（熊本➔仙台）
+    if not targets:
+        print("💡 スプレッドシート通信エラー回避のため、デフォルトの監視対象（KMJ ➔ SDJ）で自動照会します。")
+        targets.append({
+            "row": 2,
+            "origin": "KMJ",
+            "destination": "SDJ",
+            "date_cond": "金土日",
+            "cabin": "エコノミー",
+            "note": "熊本→仙台 (自動バックアップ照会)"
+        })
+
+    print(f"✅ 対象ルート {len(targets)} 件を読み込みました。")
+    return targets
 
 def send_discord_notification(data):
     embed = {
