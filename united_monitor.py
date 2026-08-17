@@ -1,10 +1,11 @@
 import os
 import time
 import json
+import csv
+import io
 import hashlib
 import requests
 import datetime
-import pandas as pd
 from playwright.sync_api import sync_playwright
 
 # ★設定
@@ -14,18 +15,20 @@ DISCORD_MENTION = "@everyone"
 SEARCH_MONTHS_COUNT = 6  # 6ヶ月分を自動監視
 
 def get_spreadsheet_rows():
-    """スプレッドシートから有効な監視設定を取得"""
+    """スプレッドシートから有効な監視設定を取得 (標準csvモジュール化でエラー回避)"""
     csv_url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv"
     try:
-        df = pd.read_csv(csv_url)
+        res = requests.get(csv_url, timeout=15)
+        res.encoding = 'utf-8'
+        reader = csv.reader(io.StringIO(res.text))
+        rows = list(reader)
         active_rows = []
-        for _, row in df.iterrows():
-            status = str(row.iloc[0]).strip()
-            if status == "有効":
-                origin = str(row.iloc[1])[:3].upper()
-                destination = str(row.iloc[2])[:3].upper()
-                condition = str(row.iloc[3]).strip()
-                note = str(row.iloc[5]).strip() if len(row) > 5 and not pd.isna(row.iloc[5]) else ""
+        for row in rows[1:]:
+            if len(row) >= 4 and str(row[0]).strip() == "有効":
+                origin = str(row[1])[:3].upper()
+                destination = str(row[2])[:3].upper()
+                condition = str(row[3]).strip()
+                note = str(row[5]).strip() if len(row) > 5 else ""
                 active_rows.append({
                     "origin": origin,
                     "destination": destination,
