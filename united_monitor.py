@@ -60,7 +60,6 @@ def search_united_award_browser(page, origin, destination, year_month_str):
         page.goto(url, wait_until="domcontentloaded", timeout=45000)
         time.sleep(4)
         
-        # 画面内のすべての要素から7k / 7,000表示セルを取得
         elements = page.query_selector_all("button, div, td")
         for el in elements:
             try:
@@ -69,7 +68,6 @@ def search_united_award_browser(page, origin, destination, year_month_str):
                 
                 if ("7k" in text.lower() or "7,000" in text or "7k" in aria_label.lower() or "7,000" in aria_label):
                     val = aria_label if aria_label else text
-                    # 日付情報が含まれているか確認
                     if any(char.isdigit() for char in val) and ("月" in val or "月" in text or "-" in val or "202" in val):
                         clean_val = val.replace("\n", " ").strip()
                         if clean_val not in available_dates and len(clean_val) < 60:
@@ -95,9 +93,16 @@ def main():
     all_results = []
 
     with sync_playwright() as p:
+        # '--disable-http2' を確実に追加してプロトコルエラーを物理的に遮断
         browser = p.chromium.launch(
             headless=True,
-            args=['--no-sandbox', '--disable-setuid-sandbox']
+            args=[
+                '--disable-http2',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-blink-features=AutomationControlled'
+            ]
         )
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
