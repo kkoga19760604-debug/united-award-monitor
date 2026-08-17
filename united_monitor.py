@@ -15,13 +15,13 @@ DISCORD_MENTION = "@everyone"
 SEARCH_MONTHS_COUNT = 6  # 6ヶ月分を自動監視
 
 def get_spreadsheet_rows():
-    """スプレッドシートから有効な監視設定を取得 (失敗時のフォールバック機能付き)"""
-    csv_url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv"
+    """スプレッドシートから有効な監視設定を取得 (形式改善版)"""
+    csv_url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv"
     active_rows = []
     try:
         res = requests.get(csv_url, timeout=15)
         res.encoding = 'utf-8'
-        if res.status_code == 200 and "有効" in res.text:
+        if res.status_code == 200:
             reader = csv.reader(io.StringIO(res.text))
             rows = list(reader)
             for row in rows[1:]:
@@ -51,22 +51,24 @@ def get_spreadsheet_rows():
     return active_rows
 
 def search_united_award(page, origin, destination, year_month_str):
-    """United航空公式サイトのカレンダーをPlaywrightで取得"""
+    """United航空公式サイトのカレンダーをPlaywrightで取得 (タイムアウト回避版)"""
     date_str = f"{year_month_str[:4]}-{year_month_str[4:]}-01"
     url = f"https://www.united.com/ja/jp/flight-search/book-a-flight/results?f={origin}&t={destination}&d={date_str}&tt=1&sc=7&pk=1&px=1&taxOnly=false&amt=7000"
     
     available_dates = []
     try:
-        # ページ移動
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        time.sleep(5)
+        # wait_until='commit' でバックグラウンド通信による60秒タイムアウトを完全回避
+        page.goto(url, wait_until="commit", timeout=30000)
+        time.sleep(6)  # カレンダーの描画完了待ち
         
-        cells = page.query_selector_all("div[class*='CalendarDay'], td[class*='calendar-day']")
+        cells = page.query_selector_all("div[class*='CalendarDay'], td[class*='calendar-day'], div[aria-label*='7,000'], div[aria-label*='7k']")
         for cell in cells:
             text = cell.inner_text()
-            if "7k" in text.lower() or "7,000" in text:
-                aria_label = cell.get_attribute("aria-label") or text
-                available_dates.append(aria_label)
+            aria_label = cell.get_attribute("aria-label") or ""
+            if "7k" in text.lower() or "7,000" in text or "7k" in aria_label.lower() or "7,000" in aria_label:
+                val = aria_label if aria_label else text
+                if val and val not in available_dates:
+                    available_dates.append(val)
     except Exception as e:
         print(f"検索エラー ({origin} -> {destination} {year_month_str}): {e}")
     
@@ -86,7 +88,6 @@ def main():
     all_results = []
 
     with sync_playwright() as p:
-        # ERR_HTTP2_PROTOCOL_ERROR 回避のための引数を指定
         browser = p.chromium.launch(
             headless=True,
             args=[
