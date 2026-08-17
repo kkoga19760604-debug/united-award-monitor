@@ -15,30 +15,41 @@ DISCORD_MENTION = "@everyone"
 SEARCH_MONTHS_COUNT = 6  # 6ヶ月分を自動監視
 
 def get_spreadsheet_rows():
-    """スプレッドシートから有効な監視設定を取得 (標準csvモジュール化でエラー回避)"""
+    """スプレッドシートから有効な監視設定を取得 (失敗時のフォールバック機能付き)"""
     csv_url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv"
+    active_rows = []
     try:
         res = requests.get(csv_url, timeout=15)
         res.encoding = 'utf-8'
-        reader = csv.reader(io.StringIO(res.text))
-        rows = list(reader)
-        active_rows = []
-        for row in rows[1:]:
-            if len(row) >= 4 and str(row[0]).strip() == "有効":
-                origin = str(row[1])[:3].upper()
-                destination = str(row[2])[:3].upper()
-                condition = str(row[3]).strip()
-                note = str(row[5]).strip() if len(row) > 5 else ""
-                active_rows.append({
-                    "origin": origin,
-                    "destination": destination,
-                    "condition": condition,
-                    "note": note
-                })
-        return active_rows
+        if res.status_code == 200 and "有効" in res.text:
+            reader = csv.reader(io.StringIO(res.text))
+            rows = list(reader)
+            for row in rows[1:]:
+                if len(row) >= 4 and str(row[0]).strip() == "有効":
+                    origin = str(row[1])[:3].upper()
+                    destination = str(row[2])[:3].upper()
+                    condition = str(row[3]).strip()
+                    note = str(row[5]).strip() if len(row) > 5 else ""
+                    active_rows.append({
+                        "origin": origin,
+                        "destination": destination,
+                        "condition": condition,
+                        "note": note
+                    })
     except Exception as e:
-        print(f"スプレッドシート読み込みエラー: {e}")
-        return []
+        print(f"スプレッドシート読み込み注意: {e}")
+
+    # 万が一読み込めなかった場合の自動バックアップ設定 (熊本 ➔ 仙台)
+    if not active_rows:
+        print("スプレッドシートから行を取得できなかったため、デフォルト設定(KMJ -> SDJ)で検索を実行します。")
+        active_rows.append({
+            "origin": "KMJ",
+            "destination": "SDJ",
+            "condition": "すべて",
+            "note": "熊本➔仙台 監視"
+        })
+
+    return active_rows
 
 def search_united_award(page, origin, destination, year_month_str):
     """United航空公式サイトのカレンダーをPlaywrightで取得"""
@@ -64,9 +75,6 @@ def search_united_award(page, origin, destination, year_month_str):
 def main():
     print("=== ユナイテッド航空 特典空席 自動監視システム開始 (6ヶ月一括モード) ===")
     active_rows = get_spreadsheet_rows()
-    if not active_rows:
-        print("有効な監視路線がありませんでした。")
-        return
 
     now = datetime.datetime.now()
     target_months = []
