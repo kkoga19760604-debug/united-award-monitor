@@ -51,36 +51,46 @@ def get_spreadsheet_rows():
     return active_rows
 
 def search_united_award_browser(page, origin, destination, year_month_str):
-    """Playwrightでユナイテッド航空公式画面を開き、7kセルを直接パース"""
-    date_str = f"{year_month_str[:4]}-{year_month_str[4:]}-01"
-    url = f"https://www.united.com/ja/jp/flight-search/book-a-flight/results?f={origin}&t={destination}&d={date_str}&tt=1&sc=7&pk=1&px=1&taxOnly=false&amt=7000"
+    """Playwrightでユナイテッド航空公式画面を開き、全要素から7kセルを強力抽出"""
+    # 該当月の18日を基準に指定してカレンダーを広げる
+    date_str = f"{year_month_str[:4]}-{year_month_str[4:]}-18"
+    url = f"https://www.united.com/ja/jp/flight-search/book-a-flight/results?f={origin}&t={destination}&d={date_str}&tt=1&at=1&sc=7&pk=1&px=1&taxOnly=false&amt=7000"
     
     available_dates = []
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=45000)
-        time.sleep(4)
+        time.sleep(6)  # カレンダー全レンダリング待ち
         
-        elements = page.query_selector_all("button, div, td")
-        for el in elements:
-            try:
-                text = el.inner_text() or ""
-                aria_label = el.get_attribute("aria-label") or ""
-                
-                if ("7k" in text.lower() or "7,000" in text or "7k" in aria_label.lower() or "7,000" in aria_label):
-                    val = aria_label if aria_label else text
-                    if any(char.isdigit() for char in val) and ("月" in val or "月" in text or "-" in val or "202" in val):
-                        clean_val = val.replace("\n", " ").strip()
-                        if clean_val not in available_dates and len(clean_val) < 60:
-                            available_dates.append(clean_val)
-            except Exception:
-                continue
+        # JavaScriptでDOM全体から7k/7,000表示要素を一括スキャン
+        extract_script = """
+        () => {
+            const results = [];
+            const nodes = document.querySelectorAll('button, div, td, span, a');
+            nodes.forEach(el => {
+                const text = (el.innerText || '').toLowerCase();
+                const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                if (text.includes('7k') || text.includes('7,000') || aria.includes('7k') || aria.includes('7,000')) {
+                    const fullText = el.getAttribute('aria-label') || el.innerText || '';
+                    if (fullText && fullText.length < 100) {
+                        results.push(fullText.replace(/\\n/g, ' ').trim());
+                    }
+                }
+            });
+            return Array.from(new Set(results));
+        }
+        """
+        found_texts = page.evaluate(extract_script)
+        if found_texts:
+            for item in found_texts:
+                if item not in available_dates:
+                    available_dates.append(item)
     except Exception as e:
         print(f"画面取得エラー ({origin} -> {destination} {year_month_str}): {e}")
     
     return available_dates
 
 def main():
-    print(f"=== ユナイテッド航空 特典空席 自動監視システム開始 (Playwright公式ブラウザ検索) ===")
+    print(f"=== ユナイテッド航空 特典空席 自動監視システム開始 (公式画面全要素パース) ===")
     active_rows = get_spreadsheet_rows()
 
     now = datetime.datetime.now()
@@ -93,7 +103,6 @@ def main():
     all_results = []
 
     with sync_playwright() as p:
-        # '--disable-http2' を確実に追加してプロトコルエラーを物理的に遮断
         browser = p.chromium.launch(
             headless=True,
             args=[
