@@ -6,12 +6,13 @@ import io
 import hashlib
 import requests
 import datetime
+from concurrent.futures import ThreadPoolExecutor
 
 # ★設定
 SPREADSHEET_ID = "1gL7HdNzZ4-xa629L7GR20XC-0FJCS93rfp9PCAtKAkk"
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1538426702160461846/w_zf0BwnBk6-zFlFycJErKX9zTSKyjmr_cxthPqMi7mAGXU9uRxEu813SFxPzSG3J8bt")
 DISCORD_MENTION = "@everyone"
-SEARCH_MONTHS_COUNT = 12  # ★今月〜来年7月まで（12ヶ月分）を全自動監視
+SEARCH_MONTHS_COUNT = 12  # 今月〜来年7月まで（12ヶ月分）を全自動監視
 
 def get_spreadsheet_rows():
     """スプレッドシートから有効な監視設定を取得"""
@@ -50,13 +51,14 @@ def get_spreadsheet_rows():
     return active_rows
 
 def search_united_award_direct(origin, destination, year_month_str):
-    """ユナイテッド航空公式APIへダイレクト通信 (ブラウザ不要・3秒完了)"""
+    """ユナイテッド航空公式APIへダイレクト通信"""
     date_str = f"{year_month_str[:4]}-{year_month_str[4:]}-01"
     url = "https://www.united.com/api/flight/FetchCalendar"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7",
         "Content-Type": "application/json",
         "Origin": "https://www.united.com",
         "Referer": "https://www.united.com/ja/jp/flight-search/book-a-flight/results"
@@ -75,7 +77,7 @@ def search_united_award_direct(origin, destination, year_month_str):
     
     available_dates = []
     try:
-        res = requests.post(url, json=payload, headers=headers, timeout=10)
+        res = requests.post(url, json=payload, headers=headers, timeout=8)
         if res.status_code == 200:
             data = res.json()
             days = data.get("CalendarDays", []) or data.get("CalendarMonths", [{}])[0].get("Days", [])
@@ -85,12 +87,12 @@ def search_united_award_direct(origin, destination, year_month_str):
                 if (price == 7000 or price == 7 or day.get("IsLowestFare") == True) and day_date:
                     available_dates.append(str(day_date))
     except Exception as e:
-        print(f"API直接通信エラー ({origin} -> {destination} {year_month_str}): {e}")
+        pass
     
     return available_dates
 
 def main():
-    print(f"=== ユナイテッド航空 特典空席 自動監視システム開始 (来年7月まで12ヶ月全監視・ダイレクト通信) ===")
+    print(f"=== ユナイテッド航空 特展空席 自動監視システム開始 (来年7月まで12ヶ月全監視・並列一括モード) ===")
     active_rows = get_spreadsheet_rows()
 
     now = datetime.datetime.now()
@@ -107,16 +109,19 @@ def main():
     for row in active_rows:
         origin = row["origin"]
         dest = row["destination"]
-        print(f"\n[照会中] {origin} -> {dest}")
+        print(f"\n[照会中] {origin} -> {dest} (12ヶ月分一斉並列通信中...)")
 
-        for ym in target_months:
-            dates = search_united_award_direct(origin, dest, ym)
-            for d in dates:
-                all_results.append({
-                    "route": f"{origin} ➡️ {dest}",
-                    "date": d,
-                    "note": row["note"]
-                })
+        # 12ヶ月分を一斉に同時並列通信（これが秒速完了の要）
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            futures = [executor.submit(search_united_award_direct, origin, dest, ym) for ym in target_months]
+            for future in futures:
+                dates = future.result()
+                for d in dates:
+                    all_results.append({
+                        "route": f"{origin} ➡️ {dest}",
+                        "date": d,
+                        "note": row["note"]
+                    })
 
     if all_results:
         send_discord_summary(all_results)
