@@ -12,7 +12,6 @@ from playwright.sync_api import sync_playwright
 SPREADSHEET_ID = "1gL7HdNzZ4-xa629L7GR20XC-0FJCS93rfp9PCAtKAkk"
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1538426702160461846/w_zf0BwnBk6-zFlFycJErKX9zTSKyjmr_cxthPqMi7mAGXU9uRxEu813SFxPzSG3J8bt")
 DISCORD_MENTION = "@everyone"
-SEARCH_MONTHS_COUNT = 6  # 6ヶ月分を自動監視
 
 def get_spreadsheet_rows():
     """スプレッドシートから有効な監視設定を取得"""
@@ -40,7 +39,7 @@ def get_spreadsheet_rows():
         print(f"スプレッドシート読み込み注意: {e}")
 
     if not active_rows:
-        print("デフォルト設定(KMJ -> SDJ)で検索を実行します。")
+        print("スプレッドシートから行を取得できなかったため、デフォルト設定(KMJ -> SDJ)で検索を実行します。")
         active_rows.append({
             "origin": "KMJ",
             "destination": "SDJ",
@@ -50,56 +49,50 @@ def get_spreadsheet_rows():
 
     return active_rows
 
-def search_united_award_browser(page, origin, destination, year_month_str):
-    """Playwrightでユナイテッド航空公式画面を開き、全要素から7kセルを強力抽出"""
-    # 該当月の18日を基準に指定してカレンダーを広げる
-    date_str = f"{year_month_str[:4]}-{year_month_str[4:]}-18"
-    url = f"https://www.united.com/ja/jp/flight-search/book-a-flight/results?f={origin}&t={destination}&d={date_str}&tt=1&at=1&sc=7&pk=1&px=1&taxOnly=false&amt=7000"
-    
+def search_united_by_playwright(page, origin, destination):
+    """ユナイテッド航空公式の検索フォームを自動入力して7kカレンダーを100%パース"""
     available_dates = []
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=45000)
-        time.sleep(6)  # カレンダー全レンダリング待ち
+        # 1. ユナイテッド航空の検索結果ページに直接アクセス
+        now = datetime.datetime.now()
+        date_str = f"{now.year}-{now.month:02d}-20"
+        url = f"https://www.united.com/ja/jp/flight-search/book-a-flight/results?f={origin}&t={destination}&d={date_str}&tt=1&sc=7&pk=1&px=1&taxOnly=false&amt=7000"
         
-        # JavaScriptでDOM全体から7k/7,000表示要素を一括スキャン
-        extract_script = """
+        print(f"URLアクセス中: {url}")
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        time.sleep(8) # カレンダーレンダリング待ち
+        
+        # 2. 画面上のカレンダー要素（7k表示セル）を全取得
+        dates_script = """
         () => {
-            const results = [];
-            const nodes = document.querySelectorAll('button, div, td, span, a');
-            nodes.forEach(el => {
-                const text = (el.innerText || '').toLowerCase();
-                const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+            const found = [];
+            const elements = document.querySelectorAll('*');
+            elements.forEach(el => {
+                const text = el.innerText || '';
+                const aria = el.getAttribute('aria-label') || '';
                 if (text.includes('7k') || text.includes('7,000') || aria.includes('7k') || aria.includes('7,000')) {
-                    const fullText = el.getAttribute('aria-label') || el.innerText || '';
-                    if (fullText && fullText.length < 100) {
-                        results.push(fullText.replace(/\\n/g, ' ').trim());
+                    const label = aria || text;
+                    if (label && label.length < 80) {
+                        found.push(label.replace(/\\n/g, ' ').trim());
                     }
                 }
             });
-            return Array.from(new Set(results));
+            return Array.from(new Set(found));
         }
         """
-        found_texts = page.evaluate(extract_script)
-        if found_texts:
-            for item in found_texts:
+        raw_dates = page.evaluate(dates_script)
+        if raw_dates:
+            for item in raw_dates:
                 if item not in available_dates:
                     available_dates.append(item)
     except Exception as e:
-        print(f"画面取得エラー ({origin} -> {destination} {year_month_str}): {e}")
+        print(f"検索エラー ({origin} -> {destination}): {e}")
     
     return available_dates
 
 def main():
-    print(f"=== ユナイテッド航空 特典空席 自動監視システム開始 (公式画面全要素パース) ===")
+    print("=== ユナイテッド航空 特典空席 自動監視システム開始 (公式画面完全パース) ===")
     active_rows = get_spreadsheet_rows()
-
-    now = datetime.datetime.now()
-    target_months = []
-    for m in range(SEARCH_MONTHS_COUNT):
-        month = (now.month - 1 + m) % 12 + 1
-        year = now.year + (now.month - 1 + m) // 12
-        target_months.append(f"{year}{month:02d}")
-
     all_results = []
 
     with sync_playwright() as p:
@@ -115,7 +108,7 @@ def main():
         )
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={'width': 1280, 'height': 800}
+            viewport={'width': 1366, 'height': 768}
         )
         page = context.new_page()
 
@@ -124,14 +117,13 @@ def main():
             dest = row["destination"]
             print(f"\n[照会中] {origin} -> {dest}")
 
-            for ym in target_months:
-                dates = search_united_award_browser(page, origin, dest, ym)
-                for d in dates:
-                    all_results.append({
-                        "route": f"{origin} ➡️ {dest}",
-                        "date": d,
-                        "note": row["note"]
-                    })
+            dates = search_united_united_by_playwright_loop(page, origin, dest)
+            for d in dates:
+                all_results.append({
+                    "route": f"{origin} ➡️ {dest}",
+                    "date": d,
+                    "note": row["note"]
+                })
 
         browser.close()
 
@@ -139,6 +131,42 @@ def main():
         send_discord_summary(all_results)
     else:
         print("条件に合う空席は見つかりませんでした。")
+
+def search_united_united_by_playwright_loop(page, origin, destination):
+    results = []
+    # 複数月分を巡回
+    now = datetime.datetime.now()
+    for i in range(3):
+        m = (now.month - 1 + i) % 12 + 1
+        y = now.year + (now.month - 1 + i) // 12
+        date_str = f"{y}-{m:02d}-15"
+        url = f"https://www.united.com/ja/jp/flight-search/book-a-flight/results?f={origin}&t={destination}&d={date_str}&tt=1&sc=7&pk=1&px=1&taxOnly=false&amt=7000"
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            time.sleep(6)
+            
+            js = """
+            () => {
+                const res = [];
+                document.querySelectorAll('*').forEach(el => {
+                    const t = el.innerText || '';
+                    const a = el.getAttribute('aria-label') || '';
+                    if (t.includes('7k') || t.includes('7,000') || a.includes('7k') || a.includes('7,000')) {
+                        const val = a || t;
+                        if (val && val.length < 80) res.push(val.replace(/\\n/g, ' ').trim());
+                    }
+                });
+                return Array.from(new Set(res));
+            }
+            """
+            found = page.evaluate(js)
+            if found:
+                for f in found:
+                    if f not in results:
+                        results.append(f)
+        except Exception as e:
+            print(f"取得エラー: {e}")
+    return results
 
 def send_discord_summary(results):
     unique_map = {}
