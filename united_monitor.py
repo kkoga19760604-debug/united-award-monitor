@@ -1,232 +1,140 @@
 import os
-import re
-import sys
-import json
-import csv
-import io
 import time
+import json
+import hashlib
 import requests
-from datetime import datetime, timedelta
+import datetime
+import pandas as pd
 from playwright.sync_api import sync_playwright
 
+# ★設定
+SPREADSHEET_ID = "1gL7HdNzZ4-xa629L7GR20XC-0FJCS93rfp9PCAtKAkk"
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1538426702160461846/w_zf0BwnBk6-zFlFycJErKX9zTSKyjmr_cxthPqMi7mAGXU9uRxEu813SFxPzSG3J8bt")
-SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1gL7HdNzZ4-xa629L7GR20XC-0FJCS93rfp9PCAtKAkk/export?format=csv"
+DISCORD_MENTION = "@everyone"
+SEARCH_MONTHS_COUNT = 6  # 6ヶ月分を自動監視
 
-def extract_airport_code(text):
-    if not text:
-        return ""
-    match = re.search(r'^[A-Za-z]{3}', str(text).strip())
-    if match:
-        return match.group(0).upper()
-    return str(text).strip()[:3].upper()
-
-def is_japanese_holiday(dt):
+def get_spreadsheet_rows():
+    """スプレッドシートから有効な監視設定を取得"""
+    csv_url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv"
     try:
-        ymd = dt.strftime("%Y-%m-%d")
-        res = requests.get(f"https://holidays-jp.github.io/api/v1/{dt.year}/date.json", timeout=5)
-        if res.status_code == 200:
-            holidays = res.json()
-            return ymd in holidays
-    except Exception:
-        pass
-    return False
+        df = pd.read_csv(csv_url)
+        active_rows = []
+        for _, row in df.iterrows():
+            status = str(row.iloc[0]).strip()
+            if status == "有効":
+                origin = str(row.iloc[1])[:3].upper()
+                destination = str(row.iloc[2])[:3].upper()
+                condition = str(row.iloc[3]).strip()
+                note = str(row.iloc[5]).strip() if len(row) > 5 and not pd.isna(row.iloc[5]) else ""
+                active_rows.append({
+                    "origin": origin,
+                    "destination": destination,
+                    "condition": condition,
+                    "note": note
+                })
+        return active_rows
+    except Exception as e:
+        print(f"スプレッドシート読み込みエラー: {e}")
+        return []
 
-def matches_date_condition(dt, condition_str):
-    if not condition_str or condition_str == "すべて":
-        return True
+def search_united_award(page, origin, destination, year_month_str):
+    """United航空公式サイトのカレンダーをPlaywrightで取得"""
+    date_str = f"{year_month_str[:4]}-{year_month_str[4:]}-01"
+    url = f"https://www.united.com/ja/jp/flight-search/book-a-flight/results?f={origin}&t={destination}&d={date_str}&tt=1&sc=7&pk=1&px=1&taxOnly=false&amt=7000"
     
-    day_of_week = dt.weekday()
-    date_str = dt.strftime("%Y-%m-%d")
-    is_holiday = is_japanese_holiday(dt)
-
-    conditions = [c.strip() for c in condition_str.split(",")]
-
-    for cond in conditions:
-        if cond == date_str:
-            return True
-        if cond in ["月", "月曜", "月曜日"] and day_of_week == 0:
-            return True
-        if cond in ["火", "火曜", "火曜日"] and day_of_week == 1:
-            return True
-        if cond in ["水", "水曜", "水曜日"] and day_of_week == 2:
-            return True
-        if cond in ["木", "木曜", "木曜日"] and day_of_week == 3:
-            return True
-        if cond in ["金", "金曜", "金曜日"] and day_of_week == 4:
-            return True
-        if cond in ["土", "土曜", "土曜日"] and day_of_week == 5:
-            return True
-        if cond in ["日", "日曜", "日曜日"] and day_of_week == 6:
-            return True
-        if cond in ["祝", "祝日"] and is_holiday:
-            return True
-        if cond == "土日" and day_of_week in [5, 6]:
-            return True
-        if ("日祝" in cond or "日曜・祝日" in cond) and (day_of_week == 6 or is_holiday):
-            return True
-        if cond == "金土日" and day_of_week in [4, 5, 6]:
-            return True
-        if cond == "土日祝" and (day_of_week in [5, 6] or is_holiday):
-            return True
-        if cond == "金土日祝" and (day_of_week in [4, 5, 6] or is_holiday):
-            return True
-            
-    return False
-
-def get_sheet_targets():
-    print("📊 スプレッドシートの設定を取得中...")
-    targets = []
+    available_dates = []
     try:
-        res = requests.get(SPREADSHEET_CSV_URL, timeout=10)
-        res.encoding = 'utf-8'
-        reader = csv.reader(io.StringIO(res.text))
-        rows = list(reader)
+        page.goto(url, wait_until="networkidle", timeout=60000)
+        time.sleep(3)
         
-        for i, row in enumerate(rows[1:], start=2):
-            if len(row) < 5:
-                continue
-            status = row[0].strip()
-            if status != "有効":
-                continue
-            
-            origin = extract_airport_code(row[1])
-            destination = extract_airport_code(row[2])
-            date_cond = row[3].strip()
-            cabin = row[4].strip()
-            note = row[5].strip() if len(row) > 5 else ""
-
-            if origin and destination:
-                targets.append({
-                    "row": i,
-                    "origin": origin,
-                    "destination": destination,
-                    "date_cond": date_cond,
-                    "cabin": cabin,
-                    "note": note
-                })
+        cells = page.query_selector_all("div[class*='CalendarDay'], td[class*='calendar-day']")
+        for cell in cells:
+            text = cell.inner_text()
+            if "7k" in text.lower() or "7,000" in text:
+                aria_label = cell.get_attribute("aria-label") or text
+                available_dates.append(aria_label)
     except Exception as e:
-        print(f"⚠️ スプレッドシート取得スキップ: {e}")
-
-    # 万が一シート読み込みが0件だった場合の自動保証設定（熊本➔仙台）
-    if not targets:
-        print("💡 スプレッドシート通信エラー回避のため、デフォルトの監視対象（KMJ ➔ SDJ）で自動照会します。")
-        targets.append({
-            "row": 2,
-            "origin": "KMJ",
-            "destination": "SDJ",
-            "date_cond": "金土日",
-            "cabin": "エコノミー",
-            "note": "熊本→仙台 (自動バックアップ照会)"
-        })
-
-    print(f"✅ 対象ルート {len(targets)} 件を読み込みました。")
-    return targets
-
-def send_discord_notification(data):
-    embed = {
-        "title": "✈️ 【100%公式確定】United航空 特典空席を検出！",
-        "color": 5814783,
-        "fields": [
-            {"name": "区間", "value": f"**{data['origin']} ➡️ {data['destination']}**", "inline": True},
-            {"name": "搭乗日", "value": f"**{data['date']} ({data['weekday']})**", "inline": True},
-            {"name": "必要マイル", "value": f"**{data['miles']}**", "inline": True},
-            {"name": "支払税額目安", "value": f"**{data['tax']}**", "inline": True},
-            {"name": "検索元", "value": "ユナイテッド航空 公式サイト直照会", "inline": False}
-        ],
-        "footer": {"text": f"備考: {data['note']}" if data['note'] else "United特典自動監視システム (Playwright)"},
-        "timestamp": datetime.utcnow().isoformat() + "Z"
-    }
-
-    try:
-        res = requests.post(DISCORD_WEBHOOK_URL, json={
-            "username": "United特典 リアルタイム監視",
-            "embeds": [embed]
-        })
-        if res.status_code in [200, 204]:
-            print(f"🔔 Discord通知送信成功: {data['date']} {data['origin']}->{data['destination']}")
-        else:
-            print(f"⚠️ Discord通知エラー: {res.status_code}")
-    except Exception as e:
-        print(f"❌ Discord通信エラー: {e}")
-
-def check_flights_with_browser(playwright, target):
-    origin = target['origin']
-    destination = target['destination']
-    date_cond = target['date_cond']
-    note = target['note']
-
-    print(f"\n✈️ 【ブラウザ検索開始】 {origin} ➡️ {destination} (条件: {date_cond})")
-
-    today = datetime.now()
-    dates_to_check = []
-    for d in range(1, 60):
-        target_dt = today + timedelta(days=d)
-        if matches_date_condition(target_dt, date_cond):
-            dates_to_check.append(target_dt)
-
-    if not dates_to_check:
-        print(" 条件に該当する対象日程がありません。")
-        return
-
-    print(f" 📅 監視対象日: {len(dates_to_check)} 日間をチェックします。")
-
-    browser = playwright.chromium.launch(headless=True)
-    context = browser.new_context(
-        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        viewport={"width": 1280, "height": 800}
-    )
-    page = context.new_page()
-
-    weekdays_jp = ["月", "火", "水", "木", "金", "土", "日"]
-
-    for dt in dates_to_check:
-        date_str = dt.strftime("%Y-%m-%d")
-        w_str = weekdays_jp[dt.weekday()]
-        
-        url = f"https://www.united.com/ja/jp/fsr/choose-flights?tt=1&st=bestmatches&d={date_str}&f={origin}&t={destination}&px=1&taxng=1"
-        
-        try:
-            print(f" 🔍 照会中: {date_str} ({w_str})...", end="", flush=True)
-            page.goto(url, timeout=30000, wait_until="domcontentloaded")
-            time.sleep(3)
-
-            content = page.content()
-            
-            if "7k" in content or "5.5k" in content or "6k" in content or "マイル" in content:
-                miles_match = re.search(r'(\d+(\.\d+)?k|\d{1,2},\d{3})\s*マイル?', content, re.IGNORECASE)
-                miles_str = miles_match.group(0) if miles_match else "7,000 マイル"
-                
-                tax_match = re.search(r'\+?\s*[\d,]+\s*円', content)
-                tax_str = tax_match.group(0) if tax_match else "1,290円"
-
-                print(f" 🎉 空席検知！ [{miles_str} / {tax_str}]")
-
-                send_discord_notification({
-                    "origin": origin,
-                    "destination": destination,
-                    "date": date_str,
-                    "weekday": w_str,
-                    "miles": miles_str,
-                    "tax": tax_str,
-                    "note": note
-                })
-            else:
-                print(" 空席なし/選択不可")
-                
-        except Exception as e:
-            print(f" ❌ エラー: {e}")
-            
-    browser.close()
+        print(f"検索エラー ({origin} -> {destination} {year_month_str}): {e}")
+    
+    return available_dates
 
 def main():
-    targets = get_sheet_targets()
-    if not targets:
-        print("対象の設定がありません。終了します。")
+    print("=== ユナイテッド航空 特典空席 自動監視システム開始 (6ヶ月一括モード) ===")
+    active_rows = get_spreadsheet_rows()
+    if not active_rows:
+        print("有効な監視路線がありませんでした。")
         return
 
-    with sync_playwright() as playwright:
-        for target in targets:
-            check_flights_with_browser(playwright, target)
+    now = datetime.datetime.now()
+    target_months = []
+    for m in range(SEARCH_MONTHS_COUNT):
+        month = (now.month - 1 + m) % 12 + 1
+        year = now.year + (now.month - 1 + m) // 12
+        target_months.append(f"{year}{month:02d}")
+
+    all_results = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+
+        for row in active_rows:
+            origin = row["origin"]
+            dest = row["destination"]
+            print(f"\n[照会中] {origin} -> {dest}")
+
+            for ym in target_months:
+                dates = search_united_award(page, origin, dest, ym)
+                for d in dates:
+                    all_results.append({
+                        "route": f"{origin} ➡️ {dest}",
+                        "date": d,
+                        "note": row["note"]
+                    })
+        
+        browser.close()
+
+    if all_results:
+        send_discord_summary(all_results)
+    else:
+        print("条件に合う空席は見つかりませんでした。")
+
+def send_discord_summary(results):
+    results_json = json.dumps(results, sort_keys=True)
+    current_hash = hashlib.md5(results_json.encode('utf-8')).hexdigest()
+    
+    hash_file = "last_hash.txt"
+    if os.path.exists(hash_file):
+        with open(hash_file, "r") as f:
+            if f.read().strip() == current_hash:
+                print("前回の通知内容と変化がないためDiscord送信をスキップしました。")
+                return
+
+    description = f"**条件一致 空席件数: 全 {len(results)} 件**\n\n"
+    for item in results:
+        description += f"・**{item['date']}** ({item['route']})\n"
+
+    embed = {
+        "title": "✈️ 【ユナイテッド航空 7k特典空席 一覧レポート】",
+        "color": 5814783,
+        "description": description,
+        "footer": {"text": "United特典航空券 高速監視システム (6ヶ月分一括)"},
+        "timestamp": datetime.datetime.utcnow().isoformat()
+    }
+
+    payload = {
+        "username": "United特典空席 監視Bot",
+        "content": DISCORD_MENTION,
+        "embeds": [embed]
+    }
+
+    res = requests.post(DISCORD_WEBHOOK_URL, json=payload)
+    if res.status_code == 204 or res.status_code == 200:
+        print("🎉 Discordまとめ通知の送信に成功しました！")
+        with open(hash_file, "w") as f:
+            f.write(current_hash)
+    else:
+        print(f"Discord送信エラー: {res.status_code}")
 
 if __name__ == "__main__":
     main()
