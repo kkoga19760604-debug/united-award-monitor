@@ -39,7 +39,6 @@ def get_spreadsheet_rows():
     except Exception as e:
         print(f"スプレッドシート読み込み注意: {e}")
 
-    # 万が一読み込めなかった場合の自動バックアップ設定 (熊本 ➔ 仙台)
     if not active_rows:
         print("スプレッドシートから行を取得できなかったため、デフォルト設定(KMJ -> SDJ)で検索を実行します。")
         active_rows.append({
@@ -58,8 +57,9 @@ def search_united_award(page, origin, destination, year_month_str):
     
     available_dates = []
     try:
-        page.goto(url, wait_until="networkidle", timeout=60000)
-        time.sleep(3)
+        # ページ移動
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        time.sleep(5)
         
         cells = page.query_selector_all("div[class*='CalendarDay'], td[class*='calendar-day']")
         for cell in cells:
@@ -86,8 +86,20 @@ def main():
     all_results = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        # ERR_HTTP2_PROTOCOL_ERROR 回避のための引数を指定
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                '--disable-http2',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage'
+            ]
+        )
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = context.new_page()
 
         for row in active_rows:
             origin = row["origin"]
