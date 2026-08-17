@@ -6,14 +6,13 @@ import io
 import hashlib
 import requests
 import datetime
-from concurrent.futures import ThreadPoolExecutor
+from playwright.sync_api import sync_playwright
 
 # ★設定
 SPREADSHEET_ID = "1gL7HdNzZ4-xa629L7GR20XC-0FJCS93rfp9PCAtKAkk"
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1538426702160461846/w_zf0BwnBk6-zFlFycJErKX9zTSKyjmr_cxthPqMi7mAGXU9uRxEu813SFxPzSG3J8bt")
 DISCORD_MENTION = "@everyone"
-SEARCH_MONTHS_COUNT = 12  # 今月〜来年7月まで（12ヶ月分）を全監視
-HUB_AIRPORTS = ["ITM", "HND", "NGO", "KIX", "FUK", "CTS", "OKA"]  # 乗継ハブ空港
+SEARCH_MONTHS_COUNT = 6  # 6ヶ月分を自動監視
 
 def get_spreadsheet_rows():
     """スプレッドシートから有効な監視設定を取得"""
@@ -41,7 +40,7 @@ def get_spreadsheet_rows():
         print(f"スプレッドシート読み込み注意: {e}")
 
     if not active_rows:
-        print("スプレッドシートから行を取得できなかったため、デフォルト設定(KMJ -> SDJ)で検索を実行します。")
+        print("デフォルト設定(KMJ -> SDJ)で検索を実行します。")
         active_rows.append({
             "origin": "KMJ",
             "destination": "SDJ",
@@ -51,45 +50,39 @@ def get_spreadsheet_rows():
 
     return active_rows
 
-def fetch_api(dep, arr, ym_str):
-    """APIから日付ごとの空席リストを取得 (キャッシュ対応)"""
-    date_str = f"{ym_str[:4]}-{ym_str[4:]}-01"
-    url = "https://www.united.com/api/flight/FetchCalendar"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Content-Type": "application/json",
-        "Origin": "https://www.united.com",
-        "Referer": "https://www.united.com/ja/jp/flight-search/book-a-flight/results"
-    }
-    payload = {
-        "Request": {
-            "Origin": dep,
-            "Destination": arr,
-            "DepartDate": date_str,
-            "PaxCount": 1,
-            "AwardSearch": True,
-            "SelectedCabin": "Economy"
-        }
-    }
-    result = {}
+def search_united_award_browser(page, origin, destination, year_month_str):
+    """Playwrightでユナイテッド航空公式画面を開き、7kセルを直接パース"""
+    date_str = f"{year_month_str[:4]}-{year_month_str[4:]}-01"
+    url = f"https://www.united.com/ja/jp/flight-search/book-a-flight/results?f={origin}&t={destination}&d={date_str}&tt=1&sc=7&pk=1&px=1&taxOnly=false&amt=7000"
+    
+    available_dates = []
     try:
-        res = requests.post(url, json=payload, headers=headers, timeout=8)
-        if res.status_code == 200:
-            data = res.json()
-            days = data.get("CalendarDays", []) or data.get("CalendarMonths", [{}])[0].get("Days", [])
-            for day in days:
-                price = day.get("LowestPrice") or day.get("Miles") or day.get("Price") or 0
-                day_date = day.get("Date") or day.get("DepartDate")
-                is_ok = (price == 7000 or price == 7 or day.get("IsLowestFare") == True)
-                if day_date:
-                    result[str(day_date)] = is_ok
-    except Exception:
-        pass
-    return (dep, arr, ym_str, result)
+        page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        time.sleep(4)
+        
+        # 画面内のすべての要素から7k / 7,000表示セルを取得
+        elements = page.query_selector_all("button, div, td")
+        for el in elements:
+            try:
+                text = el.inner_text() or ""
+                aria_label = el.get_attribute("aria-label") or ""
+                
+                if ("7k" in text.lower() or "7,000" in text or "7k" in aria_label.lower() or "7,000" in aria_label):
+                    val = aria_label if aria_label else text
+                    # 日付情報が含まれているか確認
+                    if any(char.isdigit() for char in val) and ("月" in val or "月" in text or "-" in val or "202" in val):
+                        clean_val = val.replace("\n", " ").strip()
+                        if clean_val not in available_dates and len(clean_val) < 60:
+                            available_dates.append(clean_val)
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"画面取得エラー ({origin} -> {destination} {year_month_str}): {e}")
+    
+    return available_dates
 
 def main():
-    print(f"=== ユナイテッド航空 特典空席 自動監視システム開始 (来年7月まで12ヶ月全監視・直行＆乗継全対応) ===")
+    print(f"=== ユナイテッド航空 特典空席 自動監視システム開始 (Playwright公式ブラウザ検索) ===")
     active_rows = get_spreadsheet_rows()
 
     now = datetime.datetime.now()
@@ -99,80 +92,47 @@ def main():
         year = now.year + (now.month - 1 + m) // 12
         target_months.append(f"{year}{month:02d}")
 
-    print(f"監視対象月: {target_months[0]} 〜 {target_months[-1]} (計12ヶ月分)")
+    all_results = []
 
-    all_detected = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-setuid-sandbox']
+        )
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={'width': 1280, 'height': 800}
+        )
+        page = context.new_page()
 
-    for row in active_rows:
-        origin = row["origin"]
-        dest = row["destination"]
-        note = row["note"]
-        print(f"\n[照会中] {origin} -> {dest} (直行便＋乗継便を全一括検索中...)")
+        for row in active_rows:
+            origin = row["origin"]
+            dest = row["destination"]
+            print(f"\n[照会中] {origin} -> {dest}")
 
-        # 必要な区間のリクエストリストを作成
-        tasks = []
-        for ym in target_months:
-            # 直行便
-            tasks.append((origin, dest, ym))
-            # 乗継便 (各ハブ空港)
-            for hub in HUB_AIRPORTS:
-                if hub != origin and hub != dest:
-                    tasks.append((origin, hub, ym))
-                    tasks.append((hub, dest, ym))
-
-        # 重複タスクの排除
-        unique_tasks = list(set(tasks))
-
-        # 並列一括通信
-        api_data = {}
-        with ThreadPoolExecutor(max_workers=20) as executor:
-            futures = [executor.submit(fetch_api, dep, arr, ym) for dep, arr, ym in unique_tasks]
-            for future in futures:
-                dep, arr, ym, res_dict = future.result()
-                api_data[f"{dep}_{arr}_{ym}"] = res_dict
-
-        # 空席判定 (直行便＋乗継便)
-        for ym in target_months:
-            # 1. 直行便
-            direct_dict = api_data.get(f"{origin}_{dest}_{ym}", {})
-            for d_str, is_ok in direct_dict.items():
-                if is_ok:
-                    all_detected.append({
+            for ym in target_months:
+                dates = search_united_award_browser(page, origin, dest, ym)
+                for d in dates:
+                    all_results.append({
                         "route": f"{origin} ➡️ {dest}",
-                        "date": d_str,
-                        "type": "直行便",
-                        "note": note
+                        "date": d,
+                        "note": row["note"]
                     })
 
-            # 2. 乗継便
-            for hub in HUB_AIRPORTS:
-                if hub == origin or hub == dest: continue
-                leg1_dict = api_data.get(f"{origin}_{hub}_{ym}", {})
-                leg2_dict = api_data.get(f"{hub}_{dest}_{ym}", {})
+        browser.close()
 
-                for d_str, is_ok1 in leg1_dict.items():
-                    if is_ok1 and leg2_dict.get(d_str) == True:
-                        all_detected.append({
-                            "route": f"{origin} ➡️ ({hub}経由) ➡️ {dest}",
-                            "date": d_str,
-                            "type": f"乗継便 ({hub}経由)",
-                            "note": note
-                        })
-
-    if all_detected:
-        send_discord_summary(all_detected)
+    if all_results:
+        send_discord_summary(all_results)
     else:
         print("条件に合う空席は見つかりませんでした。")
 
 def send_discord_summary(results):
-    # 重複排除
     unique_map = {}
     for item in results:
         k = f"{item['route']}_{item['date']}"
         if k not in unique_map:
             unique_map[k] = item
     cleaned_results = list(unique_map.values())
-    cleaned_results.sort(key=lambda x: x['date'])
 
     results_json = json.dumps(cleaned_results, sort_keys=True)
     current_hash = hashlib.md5(results_json.encode('utf-8')).hexdigest()
@@ -185,17 +145,14 @@ def send_discord_summary(results):
                 return
 
     description = f"**条件一致 空席件数: 全 {len(cleaned_results)} 件**\n\n"
-    for item in cleaned_results[:30]:  # 最大30件
-        description += f"・**{item['date']}** [{item['route']}]\n"
-
-    if len(cleaned_results) > 30:
-        description += f"\n...他 {len(cleaned_results) - 30} 件あり"
+    for item in cleaned_results[:30]:
+        description += f"・**{item['date']}** ({item['route']})\n"
 
     embed = {
         "title": "✈️ 【ユナイテッド航空 7k特典空席 一覧レポート】",
         "color": 5814783,
         "description": description,
-        "footer": {"text": "United特典航空券 高速監視システム (来年7月まで12ヶ月全監視)"},
+        "footer": {"text": "United特典航空券 高速監視システム"},
         "timestamp": datetime.datetime.utcnow().isoformat()
     }
 
@@ -207,7 +164,7 @@ def send_discord_summary(results):
 
     res = requests.post(DISCORD_WEBHOOK_URL, json=payload)
     if res.status_code == 204 or res.status_code == 200:
-        print(f"🎉 Discordまとめ通知の送信に成功しました！（合計 {len(cleaned_results)} 件の空席）")
+        print(f"🎉 Discordまとめ通知の送信に成功しました！（検出数: {len(cleaned_results)} 件）")
         with open(hash_file, "w") as f:
             f.write(current_hash)
     else:
