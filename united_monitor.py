@@ -218,15 +218,15 @@ def get_sheet_targets():
             print(f"⚠️ スプレッドシートのパースエラー: {e}")
 
     if not targets:
-        print("⚠️ 有効なスプレッドシートデータが取得できなかったため、デフォルト路線 [KMJ -> SDJ] で動作します。")
+        print("⚠️ 有効なスプレッドシートデータが取得できなかったため、デフォルト路線 [KMJ -> SDJ (2026-08-21/金曜)] で動作します。")
         targets = [
             {
                 "row": 2,
                 "origin": "KMJ",
                 "destination": "SDJ",
-                "date_cond": "すべて",
+                "date_cond": "2026-08-21,金曜,金土日祝,すべて",
                 "cabin": "エコノミー",
-                "note": "熊本(KMJ) ➡️ 仙台(SDJ) [自動監視]"
+                "note": "熊本(KMJ) ➡️ 仙台(SDJ) [2026-08-21(金)指定]"
             }
         ]
 
@@ -237,7 +237,7 @@ def get_sheet_targets():
     return targets
 
 # ==========================================
-# 【Playwright Direct Engine】United公式画面から7k空席カレンダーを100%抽出
+# 【Playwright Direct Engine】United公式画面から2026-08-21(金)以降の7k空席を直接パース
 # ==========================================
 def scrape_united_calendar_playwright(origin, destination):
     if not sync_playwright:
@@ -269,44 +269,32 @@ def scrape_united_calendar_playwright(origin, destination):
             )
             page = context.new_page()
 
-            # 今日の日付から今後向こう数ヶ月分をチェックする基準日
-            today = datetime.now()
-            # 数ヶ月分のカレンダーを巡回するため、14日刻み等でアクセス
-            start_dates = [today + timedelta(days=d) for d in range(1, 120, 14)]
+            # ターゲット日付 2026-08-21 (金曜日) を優先起点の対象に設定
+            target_start = datetime(2026, 8, 21)
+            search_dates = [target_start + timedelta(days=d) for d in [0, 7, 14, 21, 28, 35, 42, 60]]
 
             visited_dates = set()
 
-            for base_date in start_dates:
+            for base_date in search_dates:
                 d_str = base_date.strftime("%Y-%m-%d")
                 url = f"https://www.united.com/ja/jp/fsr/choose-flights?f={origin}&t={destination}&d={d_str}&tt=1&at=1&sc=7&px=1&taxng=1"
                 
                 try:
-                    print(f" 🔍 照会中: {d_str} 周辺カレンダー...", end="", flush=True)
+                    print(f" 🔍 照会中: {d_str} ({base_date.strftime('%Y-%m-%d %a')})...", end="", flush=True)
                     page.goto(url, timeout=35000, wait_until="domcontentloaded")
                     time.sleep(6) # レンダリング完了待機
 
                     text = page.evaluate("() => document.body.innerText")
 
-                    # カレンダー要素から「7k」や「5.5k」のついた日付セルを全抽出
-                    # 例: 19日\n7k\n+1,290円 または 8月19日 7k
-                    # DOM内の全テキストから正規表現パターン抽出
-                    # パターン1: "19日 7k" または "19 7k"
+                    # 日付と7k/5.5kのパターン抽出
                     day_matches = re.findall(r'(\d{1,2})\s*日?\s*\n?\s*(7k|5\.5k|6k|7,000|5,500)\s*マイル?', text, re.IGNORECASE)
                     
                     found_count = 0
                     if day_matches:
                         for day_str, miles_str in day_matches:
                             day_num = int(day_str)
-                            # 年月を現在のベース日付から推測
                             try:
                                 dt = datetime(base_date.year, base_date.month, day_num)
-                                # 過去の日付なら翌月と判定
-                                if dt < today - timedelta(days=1):
-                                    m = base_date.month + 1
-                                    y = base_date.year + (1 if m > 12 else 0)
-                                    m = 1 if m > 12 else m
-                                    dt = datetime(y, m, day_num)
-
                                 target_ymd = dt.strftime("%Y-%m-%d")
                                 if target_ymd not in visited_dates:
                                     visited_dates.add(target_ymd)
@@ -315,7 +303,7 @@ def scrape_united_calendar_playwright(origin, destination):
                                         "destination": destination,
                                         "date": target_ymd,
                                         "miles": miles_str,
-                                        "direct": False # 乗継便含む
+                                        "direct": False
                                     })
                                     found_count += 1
                             except Exception:
@@ -324,7 +312,6 @@ def scrape_united_calendar_playwright(origin, destination):
                     if found_count > 0:
                         print(f" 🎉 カレンダーより {found_count} 件の7k/5.5k空席を検出！")
                     else:
-                        # 個別画面上の「7k」「マイル」を判定
                         if any(kw in text for kw in ["7k", "5.5k", "6k", "7,000"]):
                             if d_str not in visited_dates:
                                 visited_dates.add(d_str)
@@ -370,10 +357,8 @@ def check_united_seats_free():
         date_cond = target["date_cond"]
         note = target["note"]
 
-        # United公式Playwrightエンジンでカレンダーから7k空席を100%直接抽出
         raw_seats = scrape_united_calendar_playwright(origin, destination)
 
-        # 日付条件マッチング
         for seat in raw_seats:
             try:
                 dt = datetime.strptime(seat["date"], "%Y-%m-%d")
@@ -391,7 +376,6 @@ def check_united_seats_free():
 
     print(f"\n🎯 検出された条件一致特典空席: 全 {len(all_detected_seats)} 件")
 
-    # Discord一括まとめ通知
     send_discord_summary_notification(all_detected_seats)
     print("🎉 処理が正常完了しました。")
 
@@ -426,21 +410,9 @@ def send_discord_summary_notification(detected_list):
     cleaned_list = list(unique_map.values())
     cleaned_list.sort(key=lambda x: x["date"])
 
+    # キャッシュクリア制御（毎回更新通知）
     summary_bytes = json.dumps(cleaned_list, sort_keys=True).encode('utf-8')
     summary_hash = hashlib.md5(summary_bytes).hexdigest()
-
-    last_hash = ""
-    if os.path.exists(CONFIG["CACHE_FILE"]):
-        try:
-            with open(CONFIG["CACHE_FILE"], "r", encoding="utf-8") as f:
-                cache_data = json.load(f)
-                last_hash = cache_data.get("last_summary_hash", "")
-        except Exception:
-            pass
-
-    if last_hash == summary_hash:
-        print("ℹ️ 前回通知内容と変化がないため、Discord通知をスキップします。")
-        return
 
     grouped = {}
     for item in cleaned_list:
