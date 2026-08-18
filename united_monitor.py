@@ -154,7 +154,7 @@ def matches_date_condition(dt, condition_str):
     return False
 
 # ==========================================
-# スプレッドシート取得＆パース (双方向対応)
+# スプレッドシート取得＆パース (8路線完全定義)
 # ==========================================
 def get_sheet_targets():
     print("📊 スプレッドシートの設定を取得中...")
@@ -219,29 +219,21 @@ def get_sheet_targets():
         except Exception as e:
             print(f"⚠️ スプレッドシートのパースエラー: {e}")
 
-    # フォールバック処理: 往路 (KMJ -> SDJ) と 復路 (SDJ -> KMJ) の双方をデフォルトで登録
+    # フォールバック処理: 画像にあったスプレッドシートの全8路線を完全再現
     if not targets:
-        print("⚠️ スプレッドシートから読み込めないため、デフォルト双方向路線 [KMJ ⇄ SDJ] で動作します。")
+        print("ℹ️ スプレッドシート全8路線のデフォルト定義を使用します。")
         targets = [
-            {
-                "row": 2,
-                "origin": "KMJ",
-                "destination": "SDJ",
-                "date_cond": "すべて",
-                "cabin": "エコノミー",
-                "note": "熊本(KMJ) ➡️ 仙台(SDJ) [往路 12ヶ月全自動監視]"
-            },
-            {
-                "row": 3,
-                "origin": "SDJ",
-                "destination": "KMJ",
-                "date_cond": "すべて",
-                "cabin": "エコノミー",
-                "note": "仙台(SDJ) ➡️ 熊本(KMJ) [復路 12ヶ月全自動監視]"
-            }
+            {"row": 2, "origin": "KMJ", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "note": "熊本➔仙台"},
+            {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝,日曜,祝日", "cabin": "エコノミー", "note": "仙台➔熊本"},
+            {"row": 4, "origin": "FUK", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "note": "福岡➔仙台"},
+            {"row": 5, "origin": "SDJ", "destination": "FUK", "date_cond": "日祝,日曜,祝日", "cabin": "エコノミー", "note": "仙台➔福岡"},
+            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-19,すべて", "cabin": "エコノミー", "note": "熊本➔那覇"},
+            {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19,すべて", "cabin": "エコノミー", "note": "那覇➔熊本"},
+            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-19,すべて", "cabin": "エコノミー", "note": "福岡➔那覇"},
+            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19,すべて", "cabin": "エコノミー", "note": "那覇➔福岡"}
         ]
 
-    print(f"✅ 対象監視ルート {len(targets)} 件を読み込みました。")
+    print(f"✅ 対象監視ルート全 {len(targets)} 件を読み込みました。")
     for t in targets:
         print(f"   • {t['origin']} ➡️ {t['destination']} (条件: {t['date_cond']})")
 
@@ -307,7 +299,7 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
     return availability_map
 
 # ==========================================
-# メイン実行関数 (往路 ＋ 復路 12ヶ月分一括判定)
+# メイン実行関数 (全8路線×12ヶ月一括判定)
 # ==========================================
 def check_united_seats_free():
     webhook_url = CONFIG["DISCORD_WEBHOOK_URL"]
@@ -328,7 +320,7 @@ def check_united_seats_free():
         month = (now.month - 1 + m) % 12 + 1
         target_months.append(f"{year}{month:02d}")
 
-    print(f"\n[監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} (計 {len(target_months)} ヶ月分)")
+    print(f"\n[監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} (計 {len(target_months)} ヶ月分 / 全 {len(targets)} 路線)")
 
     all_detected_seats = []
     hub_airports = CONFIG["HUB_AIRPORTS"]
@@ -339,17 +331,31 @@ def check_united_seats_free():
         date_cond = target["date_cond"]
         note = target["note"]
 
-        print(f"\n✈️ 【12ヶ月全期間 双方向一括監視】 {origin} ➡️ {destination}")
+        print(f"\n✈️ 【12ヶ月全期間 監視中】 {origin} ➡️ {destination} (条件: {date_cond})")
 
         # 1. 直行便のチェック
         direct_map = fetch_ana_route_availability_12months(origin, destination, target_months)
+        for d_str, avail in direct_map.items():
+            if avail:
+                try:
+                    dt = datetime.strptime(d_str, "%Y-%m-%d")
+                    if dt.date() >= now.date() and matches_date_condition(dt, date_cond):
+                        all_detected_seats.append({
+                            "origin": origin,
+                            "destination": destination,
+                            "date": d_str,
+                            "via": None,
+                            "direct": True,
+                            "note": note
+                        })
+                except Exception:
+                    pass
 
-        # 2. 主要ハブ（伊丹, 羽田, 中部, 関空, 福岡, 新千歳, 那覇）経由便のチェック
+        # 2. 主要ハブ経由便のチェック
         for hub in hub_airports:
             if hub in [origin, destination]:
                 continue
 
-            print(f" 🔄 経由地 [{hub}] 12ヶ月分全検証中...", end="", flush=True)
             leg1_map = fetch_ana_route_availability_12months(origin, hub, target_months)
             leg2_map = fetch_ana_route_availability_12months(hub, destination, target_months)
 
@@ -371,16 +377,14 @@ def check_united_seats_free():
                     except Exception:
                         pass
 
-            print(f" 🎉 {found_via_count} 件の乗継7k空席を検出！")
-
     unique_map = {}
     for item in all_detected_seats:
-        key = f"{item['origin']}_{item['destination']}_{item['date']}_{item['via']}"
+        key = f"{item['origin']}_{item['destination']}_{item['date']}_{item['via'] or 'DIRECT'}"
         if key not in unique_map:
             unique_map[key] = item
 
     cleaned_list = list(unique_map.values())
-    print(f"\n🎯 双方向・12ヶ月全期間で検出された条件一致 United 7k 特典空席: 全 {len(cleaned_list)} 件")
+    print(f"\n🎯 12ヶ月全期間で検出された全条件一致 United 特典空席: 全 {len(cleaned_list)} 件")
 
     send_discord_summary_notification(cleaned_list)
     print("🎉 処理が正常完了しました。")
@@ -427,9 +431,9 @@ def send_discord_summary_notification(detected_list):
 
         desc = f"**【12ヶ月全自動監視確定レポート】条件一致 特典空席件数: 全 {len(items)} 件**\n\n"
         if direct_items:
-            desc += f"✈️ **【直行便 空席日程】**\n" + "\n".join(direct_items[:25]) + "\n\n"
+            desc += f"✈️ **【直行便 空席日程】**\n" + "\n".join(direct_items[:20]) + "\n\n"
         if connect_items:
-            desc += f"🔄 **【乗継便 空席日程 (伊丹・羽田等経由)】**\n" + "\n".join(connect_items[:35]) + "\n\n"
+            desc += f"🔄 **【乗継便 空席日程 (経由便含む)】**\n" + "\n".join(connect_items[:30]) + "\n\n"
 
         notes = list(set([x["note"] for x in items if x["note"]]))
         if notes:
@@ -439,7 +443,7 @@ def send_discord_summary_notification(detected_list):
             "title": f"✈️ 【United特典空席 12ヶ月全レポート】 {route}",
             "color": 5814783,
             "description": desc,
-            "footer": {"text": "United特典航空券 12ヶ月全自動高速監視システム (必要マイル: 7,000マイル)"},
+            "footer": {"text": "United特典航空券 12ヶ月全自動高速監視システム (必要マイル: 5,500〜7,000マイル)"},
             "timestamp": datetime.utcnow().isoformat() + "Z"
         })
 
@@ -461,7 +465,7 @@ def send_discord_summary_notification(detected_list):
         )
         with urllib.request.urlopen(req, timeout=10) as res:
             if res.status in [200, 204]:
-                print(f"🎉 12ヶ月分・双方向のDiscordまとめ一括通知完了！（検出件数: {len(cleaned_list)} 件）")
+                print(f"🎉 12ヶ月分・全路線のDiscordまとめ一括通知完了！（検出件数: {len(cleaned_list)} 件）")
                 with open(CONFIG["CACHE_FILE"], "w", encoding="utf-8") as f:
                     json.dump({"last_summary_hash": summary_hash, "updated_at": datetime.now().isoformat()}, f)
             else:
