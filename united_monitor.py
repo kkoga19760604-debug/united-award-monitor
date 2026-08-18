@@ -154,7 +154,7 @@ def matches_date_condition(dt, condition_str):
     return False
 
 # ==========================================
-# スプレッドシート取得＆パース (8路線完全定義)
+# スプレッドシート取得＆パース
 # ==========================================
 def get_sheet_targets():
     print("📊 スプレッドシートの設定を取得中...")
@@ -219,7 +219,6 @@ def get_sheet_targets():
         except Exception as e:
             print(f"⚠️ スプレッドシートのパースエラー: {e}")
 
-    # フォールバック処理: 画像にあったスプレッドシートの全8路線を完全再現
     if not targets:
         print("ℹ️ スプレッドシート全8路線のデフォルト定義を使用します。")
         targets = [
@@ -299,7 +298,7 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
     return availability_map
 
 # ==========================================
-# メイン実行関数 (全8路線×12ヶ月一括判定)
+# メイン実行関数
 # ==========================================
 def check_united_seats_free():
     webhook_url = CONFIG["DISCORD_WEBHOOK_URL"]
@@ -401,7 +400,7 @@ def format_date_with_day(date_str):
         return date_str
 
 # ==========================================
-# Discord 一括まとめ通知送信
+# Discord 安全一括まとめ通知送信 (文字数制限・安全分割対応)
 # ==========================================
 def send_discord_summary_notification(detected_list):
     webhook_url = CONFIG["DISCORD_WEBHOOK_URL"]
@@ -414,9 +413,6 @@ def send_discord_summary_notification(detected_list):
 
     cleaned_list = sorted(detected_list, key=lambda x: x["date"])
 
-    summary_bytes = json.dumps(cleaned_list, sort_keys=True).encode('utf-8')
-    summary_hash = hashlib.md5(summary_bytes).hexdigest()
-
     grouped = {}
     for item in cleaned_list:
         route_key = f"{item['origin']} ➡️ {item['destination']}"
@@ -425,19 +421,37 @@ def send_discord_summary_notification(detected_list):
         grouped[route_key].append(item)
 
     embeds = []
+
     for route, items in grouped.items():
         direct_items = [f"・**{format_date_with_day(x['date'])}** [直行便]" for x in items if x["direct"]]
         connect_items = [f"・**{format_date_with_day(x['date'])}** [経由: {x['via']}]" for x in items if not x["direct"]]
 
-        desc = f"**【12ヶ月全自動監視確定レポート】条件一致 特典空席件数: 全 {len(items)} 件**\n\n"
+        # Discord 2000文字制限対策: 各路線の上位日程を表示
+        lines = []
         if direct_items:
-            desc += f"✈️ **【直行便 空席日程】**\n" + "\n".join(direct_items[:20]) + "\n\n"
+            lines.append("✈️ **【直行便 空席日程】**")
+            lines.extend(direct_items[:15])
+            if len(direct_items) > 15:
+                lines.append(f"   (他 {len(direct_items)-15} 日間の直行便空席あり)")
+            lines.append("")
+
         if connect_items:
-            desc += f"🔄 **【乗継便 空席日程 (経由便含む)】**\n" + "\n".join(connect_items[:30]) + "\n\n"
+            lines.append("🔄 **【乗継便 空席日程 (伊丹・羽田等経由)】**")
+            lines.extend(connect_items[:20])
+            if len(connect_items) > 20:
+                lines.append(f"   (他 {len(connect_items)-20} 日間の乗継便空席あり)")
+            lines.append("")
+
+        desc = f"**【12ヶ月全自動監視確定レポート】条件一致 空席: 全 {len(items)} 件**\n\n"
+        desc += "\n".join(lines)
 
         notes = list(set([x["note"] for x in items if x["note"]]))
         if notes:
-            desc += f"📝 **備考**: {', '.join(notes)}"
+            desc += f"\n📝 **備考**: {', '.join(notes)}"
+
+        # 2000文字安全カット
+        if len(desc) > 1900:
+            desc = desc[:1850] + "\n...(文字数制限のため省略)"
 
         embeds.append({
             "title": f"✈️ 【United特典空席 12ヶ月全レポート】 {route}",
@@ -447,31 +461,36 @@ def send_discord_summary_notification(detected_list):
             "timestamp": datetime.utcnow().isoformat() + "Z"
         })
 
-    payload = {
-        "username": "United特典航空券 監視",
-        "embeds": embeds[:10]
-    }
-
+    # Discord 10 Embeds 制限分割送信
     mention = CONFIG.get("DISCORD_MENTION", "").strip()
-    if mention:
-        payload["content"] = mention
 
-    try:
-        payload_bytes = json.dumps(payload).encode('utf-8')
-        req = urllib.request.Request(
-            webhook_url,
-            data=payload_bytes,
-            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
-        )
-        with urllib.request.urlopen(req, timeout=10) as res:
-            if res.status in [200, 204]:
-                print(f"🎉 12ヶ月分・全路線のDiscordまとめ一括通知完了！（検出件数: {len(cleaned_list)} 件）")
-                with open(CONFIG["CACHE_FILE"], "w", encoding="utf-8") as f:
-                    json.dump({"last_summary_hash": summary_hash, "updated_at": datetime.now().isoformat()}, f)
-            else:
-                print(f"⚠️ Discord通知応答ステータス: {res.status}")
-    except Exception as e:
-        print(f"❌ Discord通知送信エラー: {e}")
+    # Embedsを3個ずつ安全分割して送信
+    CHUNK_SIZE = 3
+    for i in range(0, len(embeds), CHUNK_SIZE):
+        chunk_embeds = embeds[i:i + CHUNK_SIZE]
+        payload = {
+            "username": "United特典航空券 監視",
+            "embeds": chunk_embeds
+        }
+        if i == 0 and mention:
+            payload["content"] = mention
+
+        try:
+            payload_bytes = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(
+                webhook_url,
+                data=payload_bytes,
+                headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as res:
+                if res.status in [200, 204]:
+                    print(f"🎉 Discord一括通知送信成功 (パート {i//CHUNK_SIZE + 1})")
+                else:
+                    print(f"⚠️ Discord通知応答ステータス: {res.status}")
+        except Exception as e:
+            print(f"❌ Discord通知送信エラー: {e}")
+
+    print(f"🎉 全 {len(cleaned_list)} 件のDiscord通知を完了しました！")
 
 if __name__ == "__main__":
     check_united_seats_free()
