@@ -2,8 +2,9 @@ name: United Award Flight Monitor
 
 on:
   schedule:
+    # 1時間おきに自動実行 (UTC時間)
     - cron: '0 * * * *'
-  workflow_dispatch:
+  workflow_dispatch: # 手動実行ボタン有効化
 
 jobs:
   monitor:
