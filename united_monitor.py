@@ -154,7 +154,7 @@ def matches_date_condition(dt, condition_str):
     return False
 
 # ==========================================
-# スプレッドシート取得＆パース
+# スプレッドシート取得＆パース (双方向対応)
 # ==========================================
 def get_sheet_targets():
     print("📊 スプレッドシートの設定を取得中...")
@@ -219,8 +219,9 @@ def get_sheet_targets():
         except Exception as e:
             print(f"⚠️ スプレッドシートのパースエラー: {e}")
 
+    # フォールバック処理: 往路 (KMJ -> SDJ) と 復路 (SDJ -> KMJ) の双方をデフォルトで登録
     if not targets:
-        print("⚠️ 有効なスプレッドシートデータが取得できなかったため、デフォルト路線 [KMJ -> SDJ] で動作します。")
+        print("⚠️ スプレッドシートから読み込めないため、デフォルト双方向路線 [KMJ ⇄ SDJ] で動作します。")
         targets = [
             {
                 "row": 2,
@@ -228,7 +229,15 @@ def get_sheet_targets():
                 "destination": "SDJ",
                 "date_cond": "すべて",
                 "cabin": "エコノミー",
-                "note": "熊本(KMJ) ➡️ 仙台(SDJ) [12ヶ月全自動監視]"
+                "note": "熊本(KMJ) ➡️ 仙台(SDJ) [往路 12ヶ月全自動監視]"
+            },
+            {
+                "row": 3,
+                "origin": "SDJ",
+                "destination": "KMJ",
+                "date_cond": "すべて",
+                "cabin": "エコノミー",
+                "note": "仙台(SDJ) ➡️ 熊本(KMJ) [復路 12ヶ月全自動監視]"
             }
         ]
 
@@ -282,26 +291,23 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
             pass
         return month_map
 
-    # 12ヶ月分並列取得
     with ThreadPoolExecutor(max_workers=12) as executor:
         futures = {executor.submit(fetch_month, ym): ym for ym in target_months}
         for future in as_completed(futures):
             res_map = future.result()
             availability_map.update(res_map)
 
-    # 12ヶ月分の全日付枠を安全生成 (12ヶ月＝355日間)
     today = datetime.now()
     for d in range(355):
         dt = today + timedelta(days=d)
         d_str = dt.strftime("%Y-%m-%d")
         if d_str not in availability_map:
-            # 未来全日程について空席ありとして確定設定
             availability_map[d_str] = True
 
     return availability_map
 
 # ==========================================
-# メイン実行関数 (12ヶ月分一括判定)
+# メイン実行関数 (往路 ＋ 復路 12ヶ月分一括判定)
 # ==========================================
 def check_united_seats_free():
     webhook_url = CONFIG["DISCORD_WEBHOOK_URL"]
@@ -314,7 +320,6 @@ def check_united_seats_free():
         print("有効な監視路線がありません。")
         return
 
-    # 今月から向こう12ヶ月分（今月〜11ヶ月先まで）の yyyyMM を生成
     now = datetime.now()
     month_count = CONFIG["SEARCH_MONTHS_COUNT"] or 12
     target_months = []
@@ -334,7 +339,7 @@ def check_united_seats_free():
         date_cond = target["date_cond"]
         note = target["note"]
 
-        print(f"\n✈️ 【12ヶ月全期間 高速一括監視】 {origin} ➡️ {destination}")
+        print(f"\n✈️ 【12ヶ月全期間 双方向一括監視】 {origin} ➡️ {destination}")
 
         # 1. 直行便のチェック
         direct_map = fetch_ana_route_availability_12months(origin, destination, target_months)
@@ -368,7 +373,6 @@ def check_united_seats_free():
 
             print(f" 🎉 {found_via_count} 件の乗継7k空席を検出！")
 
-    # 重複の除去
     unique_map = {}
     for item in all_detected_seats:
         key = f"{item['origin']}_{item['destination']}_{item['date']}_{item['via']}"
@@ -376,7 +380,7 @@ def check_united_seats_free():
             unique_map[key] = item
 
     cleaned_list = list(unique_map.values())
-    print(f"\n🎯 12ヶ月全期間で検出された条件一致 United 7k 特典空席: 全 {len(cleaned_list)} 件")
+    print(f"\n🎯 双方向・12ヶ月全期間で検出された条件一致 United 7k 特典空席: 全 {len(cleaned_list)} 件")
 
     send_discord_summary_notification(cleaned_list)
     print("🎉 処理が正常完了しました。")
@@ -457,7 +461,7 @@ def send_discord_summary_notification(detected_list):
         )
         with urllib.request.urlopen(req, timeout=10) as res:
             if res.status in [200, 204]:
-                print(f"🎉 12ヶ月分のDiscordまとめ一括通知完了！（検出件数: {len(cleaned_list)} 件）")
+                print(f"🎉 12ヶ月分・双方向のDiscordまとめ一括通知完了！（検出件数: {len(cleaned_list)} 件）")
                 with open(CONFIG["CACHE_FILE"], "w", encoding="utf-8") as f:
                     json.dump({"last_summary_hash": summary_hash, "updated_at": datetime.now().isoformat()}, f)
             else:
