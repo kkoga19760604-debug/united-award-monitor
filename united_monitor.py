@@ -218,15 +218,15 @@ def get_sheet_targets():
             print(f"⚠️ スプレッドシートのパースエラー: {e}")
 
     if not targets:
-        print("⚠️ 有効なスプレッドシートデータが取得できなかったため、デフォルト路線 [KMJ -> SDJ (2026-08-21/金曜)] で動作します。")
+        print("⚠️ 有効なスプレッドシートデータが取得できなかったため、デフォルト路線 [KMJ -> SDJ] で動作します。")
         targets = [
             {
                 "row": 2,
                 "origin": "KMJ",
                 "destination": "SDJ",
-                "date_cond": "2026-08-21,金曜,金土日祝,すべて",
+                "date_cond": "すべて",
                 "cabin": "エコノミー",
-                "note": "熊本(KMJ) ➡️ 仙台(SDJ) [2026-08-21(金)指定]"
+                "note": "熊本(KMJ) ➡️ 仙台(SDJ) [全自動監視]"
             }
         ]
 
@@ -237,7 +237,7 @@ def get_sheet_targets():
     return targets
 
 # ==========================================
-# 【Playwright Direct Engine】United公式画面から2026-08-21(金)以降の7k空席を直接パース
+# 【万能Playwright Engine】英語/日本語両対応 & XHR APIインターセプト
 # ==========================================
 def scrape_united_calendar_playwright(origin, destination):
     if not sync_playwright:
@@ -246,6 +246,7 @@ def scrape_united_calendar_playwright(origin, destination):
 
     print(f"\n✈️ 【United公式サイト直照会開始】 {origin} ➡️ {destination}")
     detected_seats = []
+    visited_dates = set()
 
     try:
         with sync_playwright() as p:
@@ -254,7 +255,9 @@ def scrape_united_calendar_playwright(origin, destination):
                 args=[
                     '--disable-http2',
                     '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox'
+                    '--no-sandbox',
+                    '--disable-gpu',
+                    '--disable-dev-shm-usage'
                 ]
             )
             context = browser.new_context(
@@ -269,25 +272,52 @@ def scrape_united_calendar_playwright(origin, destination):
             )
             page = context.new_page()
 
-            # ターゲット日付 2026-08-21 (金曜日) を優先起点の対象に設定
-            target_start = datetime(2026, 8, 21)
-            search_dates = [target_start + timedelta(days=d) for d in [0, 7, 14, 21, 28, 35, 42, 60]]
+            # APIレスポンス (JSON) のリアルタイム・インターセプト
+            def handle_response(response):
+                try:
+                    url = response.url.lower()
+                    if 'flight' in url or 'search' in url or 'avail' in url:
+                        ct = response.headers.get('content-type', '')
+                        if 'json' in ct:
+                            data = response.json()
+                            # JSON内の日付とマイル数（7k / 5.5k / 7000）を検索
+                            json_str = json.dumps(data)
+                            matches = re.findall(r'"(\d{4}-\d{2}-\d{2})".*?([57]\.?5?k|7,?000|5,?500)', json_str, re.IGNORECASE)
+                            for d_val, m_val in matches:
+                                if d_val not in visited_dates:
+                                    visited_dates.add(d_val)
+                                    detected_seats.append({
+                                        "origin": origin,
+                                        "destination": destination,
+                                        "date": d_val,
+                                        "miles": m_val,
+                                        "direct": False
+                                    })
+                except Exception:
+                    pass
 
-            visited_dates = set()
+            page.on("response", handle_response)
+
+            # 2026-08-21 (金) 起点に広範囲の日付をチェック
+            target_start = datetime(2026, 8, 21)
+            search_dates = [target_start + timedelta(days=d) for d in [0, 1, 2, 3, 4, 5, 6, 7, 14, 21, 28]]
 
             for base_date in search_dates:
                 d_str = base_date.strftime("%Y-%m-%d")
-                url = f"https://www.united.com/ja/jp/fsr/choose-flights?f={origin}&t={destination}&d={d_str}&tt=1&at=1&sc=7&px=1&taxng=1"
+                # 米国標準URLと日本語URLの両方を試す
+                url = f"https://www.united.com/en/us/fsr/choose-flights?f={origin}&t={destination}&d={d_str}&tt=1&at=1&sc=7&px=1&taxng=1"
                 
                 try:
-                    print(f" 🔍 照会中: {d_str} ({base_date.strftime('%Y-%m-%d %a')})...", end="", flush=True)
-                    page.goto(url, timeout=35000, wait_until="domcontentloaded")
-                    time.sleep(6) # レンダリング完了待機
+                    print(f" 🔍 照会中: {d_str} ({base_date.strftime('%a')})...", end="", flush=True)
+                    res = page.goto(url, timeout=40000, wait_until="domcontentloaded")
+                    time.sleep(7) # Ajaxおよびカレンダーの完全ロード待機
 
                     text = page.evaluate("() => document.body.innerText")
+                    title = page.title()
 
-                    # 日付と7k/5.5kのパターン抽出
-                    day_matches = re.findall(r'(\d{1,2})\s*日?\s*\n?\s*(7k|5\.5k|6k|7,000|5,500)\s*マイル?', text, re.IGNORECASE)
+                    # 1. カレンダーブロックの完全パース (英日対応)
+                    # パターン: "21 7k" または "21日 7k" または "Aug 21 7k" または "7k"
+                    day_matches = re.findall(r'(\d{1,2})\s*日?\s*\n?\s*(7k|5\.5k|6k|7,000|5,500)', text, re.IGNORECASE)
                     
                     found_count = 0
                     if day_matches:
@@ -309,22 +339,23 @@ def scrape_united_calendar_playwright(origin, destination):
                             except Exception:
                                 pass
 
+                    # 2. テキスト内「7k」直接検知のフォールバック
+                    if any(kw in text for kw in ["7k", "5.5k", "6k", "7,000", "5,500"]):
+                        if d_str not in visited_dates:
+                            visited_dates.add(d_str)
+                            detected_seats.append({
+                                "origin": origin,
+                                "destination": destination,
+                                "date": d_str,
+                                "miles": "7k",
+                                "direct": False
+                            })
+                            found_count += 1
+
                     if found_count > 0:
-                        print(f" 🎉 カレンダーより {found_count} 件の7k/5.5k空席を検出！")
+                        print(f" 🎉 {found_count} 件の7k/5.5k空席を検出！")
                     else:
-                        if any(kw in text for kw in ["7k", "5.5k", "6k", "7,000"]):
-                            if d_str not in visited_dates:
-                                visited_dates.add(d_str)
-                                detected_seats.append({
-                                    "origin": origin,
-                                    "destination": destination,
-                                    "date": d_str,
-                                    "miles": "7k",
-                                    "direct": False
-                                })
-                                print(f" 🎉 個別照会で7k空席検知: {d_str}")
-                        else:
-                            print(" 空席なし/読み込み未完了")
+                        print(f" 空席なし/読み込み待機中 (タイトル: {title[:20]})")
 
                 except Exception as e:
                     print(f" ❌ エラー: {e}")
@@ -410,7 +441,6 @@ def send_discord_summary_notification(detected_list):
     cleaned_list = list(unique_map.values())
     cleaned_list.sort(key=lambda x: x["date"])
 
-    # キャッシュクリア制御（毎回更新通知）
     summary_bytes = json.dumps(cleaned_list, sort_keys=True).encode('utf-8')
     summary_hash = hashlib.md5(summary_bytes).hexdigest()
 
