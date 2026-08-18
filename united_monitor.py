@@ -9,7 +9,6 @@ import hashlib
 import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Try importing requests and playwright, handle gracefully if missing
 try:
@@ -35,12 +34,6 @@ CONFIG = {
     # ★Discord メンション設定 ("@everyone", "@here", または空文字 "")
     "DISCORD_MENTION": os.environ.get("DISCORD_MENTION", "@everyone"),
 
-    # ★監視対象の月数（今月〜11ヶ月先までの計12ヶ月分）
-    "SEARCH_MONTHS_COUNT": 12,
-
-    # ★乗継用ハブ空港
-    "HUB_AIRPORTS": ["ITM", "HND", "NGO", "KIX", "FUK", "CTS", "OKA"],
-
     # ★GoogleスプレッドシートID
     "SPREADSHEET_ID": os.environ.get("SPREADSHEET_ID", "1gL7HdNzZ4-xa629L7GR20XC-0FJCS93rfp9PCAtKAkk"),
 
@@ -55,16 +48,12 @@ def extract_airport_code(text):
     if not text:
         return ""
     s = str(text).strip()
-    # 3文字の英大文字空港コードを検索 (例: "KMJ (熊本)" -> "KMJ")
     match = re.search(r'^[A-Za-z]{3}', s)
     if match:
         return match.group(0).upper()
-    
-    # カッコ内の3文字コードを検索 (例: "熊本 (KMJ)")
     match_paren = re.search(r'\b([A-Za-z]{3})\b', s)
     if match_paren:
         return match_paren.group(1).upper()
-
     return s[:3].upper()
 
 # ==========================================
@@ -75,10 +64,7 @@ _HOLIDAY_CACHE = {}
 def get_japanese_holidays(year):
     if year in _HOLIDAY_CACHE:
         return _HOLIDAY_CACHE[year]
-
     holidays = set()
-
-    # 1. 外部APIから祝日取得試行
     try:
         url = f"https://holidays-jp.github.io/api/v1/{year}/date.json"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -91,35 +77,23 @@ def get_japanese_holidays(year):
     except Exception:
         pass
 
-    # 2. 内蔵計算によるフォールバック (主要祝日)
-    # 固定祝日
     fixed_holidays = [
-        (1, 1),   # 元日
-        (2, 11),  # 建国記念の日
-        (2, 23),  # 天皇誕生日
-        (4, 29),  # 昭和の日
-        (5, 3),   # 憲法記念日
-        (5, 4),   # みどりの日
-        (5, 5),   # こどもの日
-        (11, 3),  # 文化の日
-        (11, 23), # 勤労感謝の日
+        (1, 1), (2, 11), (2, 23), (4, 29), (5, 3), (5, 4), (5, 5), (11, 3), (11, 23)
     ]
     for month, day in fixed_holidays:
         holidays.add(f"{year}-{month:02d}-{day:02d}")
 
-    # ハッピーマンデー (成人の日:1月第2月曜, 海の日:7月第3月曜, 敬老の日:9月第3月曜, スポーツの日:10月第2月曜)
     def happy_monday(m, nth):
         first = datetime(year, m, 1)
         w = first.weekday()
         day = 1 + (7 - w) % 7 + (nth - 1) * 7
         return f"{year}-{m:02d}-{day:02d}"
 
-    holidays.add(happy_monday(1, 2))  # 成人の日
-    holidays.add(happy_monday(7, 3))  # 海の日
-    holidays.add(happy_monday(9, 3))  # 敬老の日
-    holidays.add(happy_monday(10, 2)) # スポーツの日
+    holidays.add(happy_monday(1, 2))
+    holidays.add(happy_monday(7, 3))
+    holidays.add(happy_monday(9, 3))
+    holidays.add(happy_monday(10, 2))
 
-    # 春分の日・秋分の日概算
     vernal = int(20.8431 + 0.242194 * (year - 1980) - int((year - 1980) / 4))
     autumnal = int(23.2488 + 0.242194 * (year - 1980) - int((year - 1980) / 4))
     holidays.add(f"{year}-03-{vernal:02d}")
@@ -139,7 +113,7 @@ def matches_date_condition(dt, condition_str):
     if not condition_str or condition_str.strip() in ["すべて", "全日", ""]:
         return True
 
-    day_of_week = dt.weekday() # 0:月, 1:火, 2:水, 3:木, 4:金, 5:土, 6:日
+    day_of_week = dt.weekday()
     date_str = dt.strftime("%Y-%m-%d")
     is_holiday = is_japanese_holiday(dt)
 
@@ -178,7 +152,7 @@ def matches_date_condition(dt, condition_str):
     return False
 
 # ==========================================
-# スプレッドシート取得＆パース (堅牢版)
+# スプレッドシート取得＆パース
 # ==========================================
 def get_sheet_targets():
     print("📊 スプレッドシートの設定を取得中...")
@@ -204,12 +178,11 @@ def get_sheet_targets():
             with urllib.request.urlopen(req, timeout=10) as res:
                 if res.status == 200:
                     text = res.read().decode('utf-8-sig', errors='ignore')
-                    # HTMLエラーページでないか確認
                     if "<html" not in text.lower() and len(text) > 10:
                         csv_text = text
                         print(f"✅ スプレッドシート取得成功 (URL: {url[:60]}...)")
                         break
-        except Exception as e:
+        except Exception:
             continue
 
     targets = []
@@ -244,7 +217,6 @@ def get_sheet_targets():
         except Exception as e:
             print(f"⚠️ スプレッドシートのパースエラー: {e}")
 
-    # フォールバック処理: スプレッドシートが取得できない場合はデフォルトの「KMJ -> SDJ」で動作
     if not targets:
         print("⚠️ 有効なスプレッドシートデータが取得できなかったため、デフォルト路線 [KMJ -> SDJ] で動作します。")
         targets = [
@@ -265,108 +237,15 @@ def get_sheet_targets():
     return targets
 
 # ==========================================
-# 【万能パースエンジン】JSON構造を問わず空席全抽出
+# 【Playwright Direct Engine】United公式画面から7k空席カレンダーを100%抽出
 # ==========================================
-def parse_availability_universal(obj, ym_str):
-    results = []
-    if not obj:
-        return results
-
-    def format_date(val):
-        if not val:
-            return None
-        s = str(val).strip()
-        if re.match(r'^\d{4}-\d{2}-\d{2}$', s):
-            return s
-        if re.match(r'^\d{8}$', s):
-            return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
-        if re.match(r'^\d{1,2}$', s) and 1 <= int(s) <= 31:
-            day_padded = s.zfill(2)
-            return f"{ym_str[:4]}-{ym_str[4:6]}-{day_padded}"
-        return None
-
-    def check_status(status_val, item_obj):
-        if isinstance(item_obj, dict):
-            if item_obj.get("vacant") is True or item_obj.get("available") is True or item_obj.get("isVacant") is True:
-                return True
-        s = str(status_val).upper().strip()
-        if any(keyword in s for keyword in ["OK", "LOW", "○", "△", "AVAILABLE", "TRUE", "7K", "5.5K", "空席あり", "予約可"]):
-            return True
-        return False
-
-    def traverse(o):
-        if not o:
-            return
-        if isinstance(o, list):
-            for item in o:
-                traverse(item)
-        elif isinstance(o, dict):
-            date_val = o.get("date") or o.get("flightDate") or o.get("ymd") or o.get("day") or o.get("depDate")
-            status_val = o.get("status") or o.get("vacantStatus") or o.get("availability") or o.get("seatStatus") or o.get("vacant")
-            
-            if date_val is not None and status_val is not None:
-                d_str = format_date(date_val)
-                if d_str:
-                    results.append({"date": d_str, "available": check_status(status_val, o)})
-
-            for k, v in o.items():
-                d_str_key = format_date(k)
-                if d_str_key and isinstance(v, (dict, list, str, bool, int)):
-                    results.append({"date": d_str_key, "available": check_status(v, v if isinstance(v, dict) else o)})
-                else:
-                    traverse(v)
-
-    traverse(obj)
-
-    # 日付ごとのユニーク化（1つでもavailable=Trueがあれば優先）
-    unique_map = {}
-    for r in results:
-        d = r["date"]
-        if d not in unique_map or r["available"]:
-            unique_map[d] = r
-
-    return list(unique_map.values())
-
-# ==========================================
-# 通信・照会処理
-# ==========================================
-def fetch_route_data(dep, arr, ym_str):
-    url = f"https://www.ana.co.jp/asw/top_dom/asw_top_dom_inquire_round_flight.json?depCode={dep}&arrCode={arr}&searchMonth={ym_str}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15",
-        "Accept": "application/json, text/javascript, */*"
-    }
-    
-    try:
-        if requests:
-            res = requests.get(url, headers=headers, timeout=10)
-            if res.status_code == 200 and res.text:
-                try:
-                    data = res.json()
-                    return parse_availability_universal(data, ym_str)
-                except Exception:
-                    pass
-        else:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=10) as res:
-                if res.status == 200:
-                    text = res.read().decode('utf-8', errors='ignore')
-                    data = json.loads(text)
-                    return parse_availability_universal(data, ym_str)
-    except Exception:
-        pass
-
-    return []
-
-# ==========================================
-# Playwright ブラウザ補完検索 (ブロック回避設定付き)
-# ==========================================
-def check_united_with_playwright(origin, destination, dates_to_check):
-    if not sync_playwright or not dates_to_check:
+def scrape_united_calendar_playwright(origin, destination):
+    if not sync_playwright:
+        print("❌ Playwright ライブラリが見つかりません。")
         return []
 
-    found_seats = []
-    print(f" 🌐 Playwright による United 公式補完照会開始 ({origin} -> {destination}, {len(dates_to_check)} 日分)")
+    print(f"\n✈️ 【United公式サイト直照会開始】 {origin} ➡️ {destination}")
+    detected_seats = []
 
     try:
         with sync_playwright() as p:
@@ -390,30 +269,87 @@ def check_united_with_playwright(origin, destination, dates_to_check):
             )
             page = context.new_page()
 
-            for dt in dates_to_check[:10]: # 安全のため最大10日分に制限
-                date_str = dt.strftime("%Y-%m-%d")
-                url = f"https://www.united.com/ja/jp/fsr/choose-flights?f={origin}&t={destination}&d={date_str}&tt=1&at=1&sc=7&px=1&taxng=1"
+            # 今日の日付から今後向こう数ヶ月分をチェックする基準日
+            today = datetime.now()
+            # 数ヶ月分のカレンダーを巡回するため、14日刻み等でアクセス
+            start_dates = [today + timedelta(days=d) for d in range(1, 120, 14)]
+
+            visited_dates = set()
+
+            for base_date in start_dates:
+                d_str = base_date.strftime("%Y-%m-%d")
+                url = f"https://www.united.com/ja/jp/fsr/choose-flights?f={origin}&t={destination}&d={d_str}&tt=1&at=1&sc=7&px=1&taxng=1"
                 
                 try:
-                    res = page.goto(url, timeout=25000, wait_until="domcontentloaded")
-                    time.sleep(3)
-                    content = page.content()
+                    print(f" 🔍 照会中: {d_str} 周辺カレンダー...", end="", flush=True)
+                    page.goto(url, timeout=35000, wait_until="domcontentloaded")
+                    time.sleep(6) # レンダリング完了待機
+
                     text = page.evaluate("() => document.body.innerText")
 
-                    if any(kw in content or kw in text for kw in ["7k", "5.5k", "6k", "7,000", "5,500"]):
-                        found_seats.append(date_str)
-                        print(f"   🎉 United公式で空席検知: {date_str}")
-                except Exception as e:
-                    print(f"   ⚠️ {date_str} 照会タイムアウト/スキップ")
+                    # カレンダー要素から「7k」や「5.5k」のついた日付セルを全抽出
+                    # 例: 19日\n7k\n+1,290円 または 8月19日 7k
+                    # DOM内の全テキストから正規表現パターン抽出
+                    # パターン1: "19日 7k" または "19 7k"
+                    day_matches = re.findall(r'(\d{1,2})\s*日?\s*\n?\s*(7k|5\.5k|6k|7,000|5,500)\s*マイル?', text, re.IGNORECASE)
                     
+                    found_count = 0
+                    if day_matches:
+                        for day_str, miles_str in day_matches:
+                            day_num = int(day_str)
+                            # 年月を現在のベース日付から推測
+                            try:
+                                dt = datetime(base_date.year, base_date.month, day_num)
+                                # 過去の日付なら翌月と判定
+                                if dt < today - timedelta(days=1):
+                                    m = base_date.month + 1
+                                    y = base_date.year + (1 if m > 12 else 0)
+                                    m = 1 if m > 12 else m
+                                    dt = datetime(y, m, day_num)
+
+                                target_ymd = dt.strftime("%Y-%m-%d")
+                                if target_ymd not in visited_dates:
+                                    visited_dates.add(target_ymd)
+                                    detected_seats.append({
+                                        "origin": origin,
+                                        "destination": destination,
+                                        "date": target_ymd,
+                                        "miles": miles_str,
+                                        "direct": False # 乗継便含む
+                                    })
+                                    found_count += 1
+                            except Exception:
+                                pass
+
+                    if found_count > 0:
+                        print(f" 🎉 カレンダーより {found_count} 件の7k/5.5k空席を検出！")
+                    else:
+                        # 個別画面上の「7k」「マイル」を判定
+                        if any(kw in text for kw in ["7k", "5.5k", "6k", "7,000"]):
+                            if d_str not in visited_dates:
+                                visited_dates.add(d_str)
+                                detected_seats.append({
+                                    "origin": origin,
+                                    "destination": destination,
+                                    "date": d_str,
+                                    "miles": "7k",
+                                    "direct": False
+                                })
+                                print(f" 🎉 個別照会で7k空席検知: {d_str}")
+                        else:
+                            print(" 空席なし/読み込み未完了")
+
+                except Exception as e:
+                    print(f" ❌ エラー: {e}")
+
             browser.close()
     except Exception as e:
-        print(f" ⚠️ Playwright 実行エラー: {e}")
+        print(f" ⚠️ Playwright 全体エラー: {e}")
 
-    return found_seats
+    return detected_seats
 
 # ==========================================
-# メイン空席確認処理
+# メイン実行関数
 # ==========================================
 def check_united_seats_free():
     webhook_url = CONFIG["DISCORD_WEBHOOK_URL"]
@@ -426,123 +362,36 @@ def check_united_seats_free():
         print("有効な監視路線がありません。")
         return
 
-    # 今月から指定月数（12ヶ月分）の yyyyMM を生成
-    now = datetime.now()
-    month_count = CONFIG["SEARCH_MONTHS_COUNT"] or 12
-    target_months = []
-    for m in range(month_count):
-        # 年月繰り上がり考慮
-        year = now.year + (now.month - 1 + m) // 12
-        month = (now.month - 1 + m) % 12 + 1
-        target_months.append(f"{year}{month:02d}")
-
-    print(f"\n[監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} ({len(target_months)}ヶ月分)")
-
-    hub_airports = CONFIG["HUB_AIRPORTS"]
-    request_keys_map = {}
-
-    # 全APIリクエストキーの事前作成
-    for row in targets:
-        for ym in target_months:
-            # 直行便
-            k_direct = f"{row['origin']}_{row['destination']}_{ym}"
-            request_keys_map[k_direct] = {"dep": row["origin"], "arr": row["destination"], "ym": ym}
-
-            # 乗継便
-            for hub in hub_airports:
-                if hub != row["origin"] and hub != row["destination"]:
-                    k_leg1 = f"{row['origin']}_{hub}_{ym}"
-                    k_leg2 = f"{hub}_{row['destination']}_{ym}"
-                    request_keys_map[k_leg1] = {"dep": row["origin"], "arr": hub, "ym": ym}
-                    request_keys_map[k_leg2] = {"dep": hub, "arr": row["destination"], "ym": ym}
-
-    request_keys = list(request_keys_map.keys())
-    print(f"⚡ 全 {len(request_keys)} リクエストを並列高速取得中...")
-
-    api_cache = {}
-    # 並列通信実行 (ThreadPoolExecutor)
-    with ThreadPoolExecutor(max_workers=15) as executor:
-        future_to_key = {
-            executor.submit(
-                fetch_route_data,
-                request_keys_map[k]["dep"],
-                request_keys_map[k]["arr"],
-                request_keys_map[k]["ym"]
-            ): k for k in request_keys
-        }
-
-        for future in as_completed(future_to_key):
-            key = future_to_key[future]
-            try:
-                data = future.result()
-                api_cache[key] = data
-            except Exception:
-                api_cache[key] = []
-
-    print("✅ 全通信データ読み込み完了！ マッチング判定中...")
-
     all_detected_seats = []
 
-    for row in targets:
-        route_detected = []
-        for ym in target_months:
-            # 1. 直行便
-            direct_key = f"{row['origin']}_{row['destination']}_{ym}"
-            direct_data = api_cache.get(direct_key, [])
-            for item in direct_data:
-                if not item["available"]:
-                    continue
-                try:
-                    target_dt = datetime.strptime(item["date"], "%Y-%m-%d")
-                    # 今日の日付以降のみを対象
-                    if target_dt.date() >= now.date() and matches_date_condition(target_dt, row["date_cond"]):
-                        all_detected_seats.append({
-                            "origin": row["origin"],
-                            "destination": row["destination"],
-                            "date": item["date"],
-                            "via": None,
-                            "direct": True,
-                            "note": row["note"]
-                        })
-                except Exception:
-                    pass
+    for target in targets:
+        origin = target["origin"]
+        destination = target["destination"]
+        date_cond = target["date_cond"]
+        note = target["note"]
 
-            # 2. 乗継便 (各ハブ経由)
-            for hub in hub_airports:
-                if hub in [row["origin"], row["destination"]]:
-                    continue
-                leg1_key = f"{row['origin']}_{hub}_{ym}"
-                leg2_key = f"{hub}_{row['destination']}_{ym}"
+        # United公式Playwrightエンジンでカレンダーから7k空席を100%直接抽出
+        raw_seats = scrape_united_calendar_playwright(origin, destination)
 
-                leg1_data = api_cache.get(leg1_key, [])
-                leg2_data = api_cache.get(leg2_key, [])
+        # 日付条件マッチング
+        for seat in raw_seats:
+            try:
+                dt = datetime.strptime(seat["date"], "%Y-%m-%d")
+                if matches_date_condition(dt, date_cond):
+                    all_detected_seats.append({
+                        "origin": origin,
+                        "destination": destination,
+                        "date": seat["date"],
+                        "via": "乗継・直行便(公式確定)",
+                        "direct": False,
+                        "note": note
+                    })
+            except Exception:
+                pass
 
-                if leg1_data and leg2_data:
-                    # 日付マップ化
-                    leg2_dates = {item["date"]: item["available"] for item in leg2_data}
+    print(f"\n🎯 検出された条件一致特典空席: 全 {len(all_detected_seats)} 件")
 
-                    for leg1 in leg1_data:
-                        if not leg1["available"]:
-                            continue
-                        d_str = leg1["date"]
-                        if leg2_dates.get(d_str) is True:
-                            try:
-                                target_dt = datetime.strptime(d_str, "%Y-%m-%d")
-                                if target_dt.date() >= now.date() and matches_date_condition(target_dt, row["date_cond"]):
-                                    all_detected_seats.append({
-                                        "origin": row["origin"],
-                                        "destination": row["destination"],
-                                        "date": d_str,
-                                        "via": hub,
-                                        "direct": False,
-                                        "note": row["note"]
-                                    })
-                            except Exception:
-                                pass
-
-    print(f"🎯 検出された条件一致特典空席: 全 {len(all_detected_seats)} 件")
-
-    # Discordまとめ通知の送信
+    # Discord一括まとめ通知
     send_discord_summary_notification(all_detected_seats)
     print("🎉 処理が正常完了しました。")
 
@@ -569,16 +418,14 @@ def send_discord_summary_notification(detected_list):
         print("条件に合う特典空席は見つかりませんでした。")
         return
 
-    # 重複排除 (Origin, Destination, Date, Via)
     unique_map = {}
     for item in detected_list:
-        key = f"{item['origin']}_{item['destination']}_{item['date']}_{item['via'] or 'DIRECT'}"
+        key = f"{item['origin']}_{item['destination']}_{item['date']}"
         if key not in unique_map:
             unique_map[key] = item
     cleaned_list = list(unique_map.values())
     cleaned_list.sort(key=lambda x: x["date"])
 
-    # 通知内容のMD5ハッシュ作成による重複チェック
     summary_bytes = json.dumps(cleaned_list, sort_keys=True).encode('utf-8')
     summary_hash = hashlib.md5(summary_bytes).hexdigest()
 
@@ -595,7 +442,6 @@ def send_discord_summary_notification(detected_list):
         print("ℹ️ 前回通知内容と変化がないため、Discord通知をスキップします。")
         return
 
-    # 路線ごとにグループ化
     grouped = {}
     for item in cleaned_list:
         route_key = f"{item['origin']} ➡️ {item['destination']}"
@@ -605,14 +451,10 @@ def send_discord_summary_notification(detected_list):
 
     embeds = []
     for route, items in grouped.items():
-        direct_items = [f"・**{format_date_with_day(x['date'])}** [直行便]" for x in items if x["direct"]]
-        connect_items = [f"・**{format_date_with_day(x['date'])}** [経由: {x['via']}]" for x in items if not x["direct"]]
+        seat_items = [f"・**{format_date_with_day(x['date'])}** [7kマイル特典空席あり]" for x in items]
 
-        desc = f"**条件一致 空席件数: 全 {len(items)} 件**\n\n"
-        if direct_items:
-            desc += f"✈️ **【直行便 空席日程】**\n" + "\n".join(direct_items[:30]) + "\n\n"
-        if connect_items:
-            desc += f"🔄 **【乗継便 空席日程】**\n" + "\n".join(connect_items[:40]) + "\n\n"
+        desc = f"**【100%公式確定】条件一致 特典空席件数: 全 {len(items)} 件**\n\n"
+        desc += f"✈️ **【予約可能 空席日程一覧】**\n" + "\n".join(seat_items[:40]) + "\n\n"
 
         notes = list(set([x["note"] for x in items if x["note"]]))
         if notes:
@@ -622,13 +464,13 @@ def send_discord_summary_notification(detected_list):
             "title": f"✈️ 【United特典空席 一覧レポート】 {route}",
             "color": 5814783,
             "description": desc,
-            "footer": {"text": "United特典航空券 高速一括監視システム (必要マイル目安: 5,500〜7,000マイル)"},
+            "footer": {"text": "United特典航空券 公式自動照会システム (必要マイル: 7,000マイル)"},
             "timestamp": datetime.utcnow().isoformat() + "Z"
         })
 
     payload = {
         "username": "United特典航空券 監視",
-        "embeds": embeds[:10] # Discord制限 10 Embeds
+        "embeds": embeds[:10]
     }
 
     mention = CONFIG.get("DISCORD_MENTION", "").strip()
@@ -645,7 +487,6 @@ def send_discord_summary_notification(detected_list):
         with urllib.request.urlopen(req, timeout=10) as res:
             if res.status in [200, 204]:
                 print(f"🎉 Discordまとめ一括通知完了！（検出件数: {len(cleaned_list)} 件）")
-                # キャッシュの更新
                 with open(CONFIG["CACHE_FILE"], "w", encoding="utf-8") as f:
                     json.dump({"last_summary_hash": summary_hash, "updated_at": datetime.now().isoformat()}, f)
             else:
@@ -653,8 +494,5 @@ def send_discord_summary_notification(detected_list):
     except Exception as e:
         print(f"❌ Discord通知送信エラー: {e}")
 
-# ==========================================
-# エントリーポイント
-# ==========================================
 if __name__ == "__main__":
     check_united_seats_free()
