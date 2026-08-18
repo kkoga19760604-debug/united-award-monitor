@@ -237,7 +237,7 @@ def get_sheet_targets():
     return targets
 
 # ==========================================
-# 【Playwright Engine】要素の完全レンダリング待機付き判定
+# 【マイル特典全開パラメーター付き】United Playwright エンジン
 # ==========================================
 def scrape_united_calendar_playwright(origin, destination):
     if not sync_playwright:
@@ -272,7 +272,7 @@ def scrape_united_calendar_playwright(origin, destination):
             )
             page = context.new_page()
 
-            # 背景APIレスポンス (JSON) の完全キャッチ
+            # 背景API (JSON) インターセプト
             def handle_response(response):
                 try:
                     url = response.url.lower()
@@ -302,24 +302,17 @@ def scrape_united_calendar_playwright(origin, destination):
 
             for base_date in search_dates:
                 d_str = base_date.strftime("%Y-%m-%d")
-                url = f"https://www.united.com/ja/jp/fsr/choose-flights?f={origin}&t={destination}&d={d_str}&tt=1&at=1&sc=7&px=1&taxng=1"
+                # マイル特典枠（会員と同等表示）を強制出力するフルURLパラメータ群
+                url = f"https://www.united.com/ja/jp/fsr/choose-flights?f={origin}&t={destination}&d={d_str}&tt=1&at=1&sc=7&px=1&taxng=1&useType=miles&awardSearch=true&searchType=miles"
                 
                 try:
                     print(f" 🔍 照会中: {d_str} ({base_date.strftime('%a')})...", end="", flush=True)
                     page.goto(url, timeout=45000, wait_until="domcontentloaded")
-
-                    # マイル数やカレンダーがDOMにレンダリングされるまで明示的に待機 (最大15秒)
-                    try:
-                        page.wait_for_function(
-                            "() => document.body.innerText.includes('7k') || document.body.innerText.includes('5.5k') || document.body.innerText.includes('7,000') || document.body.innerText.includes('マイル') || document.body.innerText.includes('miles')",
-                            timeout=15000
-                        )
-                    except Exception:
-                        time.sleep(10) # タイムアウト時は10秒固定待機
+                    time.sleep(12) # 完全描画待機
 
                     text = page.evaluate("() => document.body.innerText")
 
-                    # 英日対応のカレンダー＆テキスト抽出
+                    # 数字+k、数字+000、または全パターンのカレンダー抽出
                     day_matches = re.findall(r'(\d{1,2})\s*日?\s*\n?\s*(7k|5\.5k|6k|7,000|5,500)', text, re.IGNORECASE)
                     
                     found_count = 0
@@ -342,7 +335,6 @@ def scrape_united_calendar_playwright(origin, destination):
                             except Exception:
                                 pass
 
-                    # テキスト内「7k」「7,000」の直接検知フォールバック
                     if any(kw in text for kw in ["7k", "5.5k", "6k", "7,000", "5,500"]):
                         if d_str not in visited_dates:
                             visited_dates.add(d_str)
