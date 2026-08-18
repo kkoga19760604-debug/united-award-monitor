@@ -237,7 +237,7 @@ def get_sheet_targets():
     return targets
 
 # ==========================================
-# 【万能Playwright Engine】英語/日本語両対応 & XHR APIインターセプト
+# 【Playwright Engine】要素の完全レンダリング待機付き判定
 # ==========================================
 def scrape_united_calendar_playwright(origin, destination):
     if not sync_playwright:
@@ -272,15 +272,14 @@ def scrape_united_calendar_playwright(origin, destination):
             )
             page = context.new_page()
 
-            # APIレスポンス (JSON) のリアルタイム・インターセプト
+            # 背景APIレスポンス (JSON) の完全キャッチ
             def handle_response(response):
                 try:
                     url = response.url.lower()
-                    if 'flight' in url or 'search' in url or 'avail' in url:
+                    if 'flight' in url or 'search' in url or 'avail' in url or 'fetchflight' in url:
                         ct = response.headers.get('content-type', '')
                         if 'json' in ct:
                             data = response.json()
-                            # JSON内の日付とマイル数（7k / 5.5k / 7000）を検索
                             json_str = json.dumps(data)
                             matches = re.findall(r'"(\d{4}-\d{2}-\d{2})".*?([57]\.?5?k|7,?000|5,?500)', json_str, re.IGNORECASE)
                             for d_val, m_val in matches:
@@ -298,25 +297,29 @@ def scrape_united_calendar_playwright(origin, destination):
 
             page.on("response", handle_response)
 
-            # 2026-08-21 (金) 起点に広範囲の日付をチェック
             target_start = datetime(2026, 8, 21)
             search_dates = [target_start + timedelta(days=d) for d in [0, 1, 2, 3, 4, 5, 6, 7, 14, 21, 28]]
 
             for base_date in search_dates:
                 d_str = base_date.strftime("%Y-%m-%d")
-                # 米国標準URLと日本語URLの両方を試す
-                url = f"https://www.united.com/en/us/fsr/choose-flights?f={origin}&t={destination}&d={d_str}&tt=1&at=1&sc=7&px=1&taxng=1"
+                url = f"https://www.united.com/ja/jp/fsr/choose-flights?f={origin}&t={destination}&d={d_str}&tt=1&at=1&sc=7&px=1&taxng=1"
                 
                 try:
                     print(f" 🔍 照会中: {d_str} ({base_date.strftime('%a')})...", end="", flush=True)
-                    res = page.goto(url, timeout=40000, wait_until="domcontentloaded")
-                    time.sleep(7) # Ajaxおよびカレンダーの完全ロード待機
+                    page.goto(url, timeout=45000, wait_until="domcontentloaded")
+
+                    # マイル数やカレンダーがDOMにレンダリングされるまで明示的に待機 (最大15秒)
+                    try:
+                        page.wait_for_function(
+                            "() => document.body.innerText.includes('7k') || document.body.innerText.includes('5.5k') || document.body.innerText.includes('7,000') || document.body.innerText.includes('マイル') || document.body.innerText.includes('miles')",
+                            timeout=15000
+                        )
+                    except Exception:
+                        time.sleep(10) # タイムアウト時は10秒固定待機
 
                     text = page.evaluate("() => document.body.innerText")
-                    title = page.title()
 
-                    # 1. カレンダーブロックの完全パース (英日対応)
-                    # パターン: "21 7k" または "21日 7k" または "Aug 21 7k" または "7k"
+                    # 英日対応のカレンダー＆テキスト抽出
                     day_matches = re.findall(r'(\d{1,2})\s*日?\s*\n?\s*(7k|5\.5k|6k|7,000|5,500)', text, re.IGNORECASE)
                     
                     found_count = 0
@@ -339,7 +342,7 @@ def scrape_united_calendar_playwright(origin, destination):
                             except Exception:
                                 pass
 
-                    # 2. テキスト内「7k」直接検知のフォールバック
+                    # テキスト内「7k」「7,000」の直接検知フォールバック
                     if any(kw in text for kw in ["7k", "5.5k", "6k", "7,000", "5,500"]):
                         if d_str not in visited_dates:
                             visited_dates.add(d_str)
@@ -355,7 +358,7 @@ def scrape_united_calendar_playwright(origin, destination):
                     if found_count > 0:
                         print(f" 🎉 {found_count} 件の7k/5.5k空席を検出！")
                     else:
-                        print(f" 空席なし/読み込み待機中 (タイトル: {title[:20]})")
+                        print(" 空席なし/読み込み未完了")
 
                 except Exception as e:
                     print(f" ❌ エラー: {e}")
