@@ -37,6 +37,9 @@ CONFIG = {
     # ★GoogleスプレッドシートID
     "SPREADSHEET_ID": os.environ.get("SPREADSHEET_ID", "1gL7HdNzZ4-xa629L7GR20XC-0FJCS93rfp9PCAtKAkk"),
 
+    # ★ログインCookieセッション鍵
+    "UNITED_COOKIE": os.environ.get("UNITED_COOKIE", ""),
+
     # キャッシュファイルパス
     "CACHE_FILE": os.path.join(os.path.dirname(__file__), ".notification_cache.json")
 }
@@ -237,7 +240,7 @@ def get_sheet_targets():
     return targets
 
 # ==========================================
-# 【マイル特典全開パラメーター付き】United Playwright エンジン
+# 【ログインCookie完全連携】United Playwright エンジン
 # ==========================================
 def scrape_united_calendar_playwright(origin, destination):
     if not sync_playwright:
@@ -247,6 +250,7 @@ def scrape_united_calendar_playwright(origin, destination):
     print(f"\n✈️ 【United公式サイト直照会開始】 {origin} ➡️ {destination}")
     detected_seats = []
     visited_dates = set()
+    user_cookie = CONFIG["UNITED_COOKIE"]
 
     try:
         with sync_playwright() as p:
@@ -260,16 +264,42 @@ def scrape_united_calendar_playwright(origin, destination):
                     '--disable-dev-shm-usage'
                 ]
             )
+
+            extra_headers = {
+                'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Sec-Ch-Ua': '"Chromium";v="122", "Google Chrome";v="122"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"macOS"'
+            }
+
+            if user_cookie:
+                extra_headers['Cookie'] = user_cookie.strip()
+                print(" 🔑 会員ログインセッションCookieを適用して照会します。")
+
             context = browser.new_context(
                 user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                 viewport={'width': 1280, 'height': 800},
-                extra_http_headers={
-                    'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
-                    'Sec-Ch-Ua': '"Chromium";v="122", "Google Chrome";v="122"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"macOS"'
-                }
+                extra_http_headers=extra_headers
             )
+
+            # Cookieの直接注入
+            if user_cookie:
+                try:
+                    cookie_list = []
+                    for item in user_cookie.split(';'):
+                        if '=' in item:
+                            k, v = item.strip().split('=', 1)
+                            cookie_list.append({
+                                "name": k.strip(),
+                                "value": v.strip(),
+                                "domain": ".united.com",
+                                "path": "/"
+                            })
+                    if cookie_list:
+                        context.add_cookies(cookie_list)
+                except Exception:
+                    pass
+
             page = context.new_page()
 
             # 背景API (JSON) インターセプト
@@ -302,17 +332,22 @@ def scrape_united_calendar_playwright(origin, destination):
 
             for base_date in search_dates:
                 d_str = base_date.strftime("%Y-%m-%d")
-                # マイル特典枠（会員と同等表示）を強制出力するフルURLパラメータ群
-                url = f"https://www.united.com/ja/jp/fsr/choose-flights?f={origin}&t={destination}&d={d_str}&tt=1&at=1&sc=7&px=1&taxng=1&useType=miles&awardSearch=true&searchType=miles"
+                url = f"https://www.united.com/ja/jp/fsr/choose-flights?f={origin}&t={destination}&d={d_str}&tt=1&at=1&sc=7&px=1&taxng=1"
                 
                 try:
                     print(f" 🔍 照会中: {d_str} ({base_date.strftime('%a')})...", end="", flush=True)
                     page.goto(url, timeout=45000, wait_until="domcontentloaded")
-                    time.sleep(12) # 完全描画待機
+
+                    try:
+                        page.wait_for_function(
+                            "() => document.body.innerText.includes('7k') || document.body.innerText.includes('5.5k') || document.body.innerText.includes('7,000') || document.body.innerText.includes('マイル') || document.body.innerText.includes('miles')",
+                            timeout=15000
+                        )
+                    except Exception:
+                        time.sleep(8)
 
                     text = page.evaluate("() => document.body.innerText")
 
-                    # 数字+k、数字+000、または全パターンのカレンダー抽出
                     day_matches = re.findall(r'(\d{1,2})\s*日?\s*\n?\s*(7k|5\.5k|6k|7,000|5,500)', text, re.IGNORECASE)
                     
                     found_count = 0

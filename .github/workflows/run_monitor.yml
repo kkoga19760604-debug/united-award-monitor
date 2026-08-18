@@ -28,5 +28,7 @@ jobs:
       - name: Run United Monitor Script
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          UNITED_COOKIE: ${{ secrets.UNITED_COOKIE }}
+          DISCORD_MENTION: "@everyone"
         run: |
           python united_monitor.py
