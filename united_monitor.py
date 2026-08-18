@@ -403,7 +403,7 @@ def format_date_with_day(date_str):
         return date_str
 
 # ==========================================
-# Discord 安全一括まとめ通知送信
+# Discord 完全網羅一括通知送信 (12ヶ月分全件通知)
 # ==========================================
 def send_discord_summary_notification(detected_list):
     webhook_url = CONFIG["DISCORD_WEBHOOK_URL"]
@@ -416,55 +416,73 @@ def send_discord_summary_notification(detected_list):
 
     cleaned_list = sorted(detected_list, key=lambda x: x["date"])
 
-    grouped = {}
+    # 路線ごとにグループ化
+    grouped_by_route = {}
     for item in cleaned_list:
         route_key = f"{item['origin']} ➡️ {item['destination']}"
-        if route_key not in grouped:
-            grouped[route_key] = []
-        grouped[route_key].append(item)
+        if route_key not in grouped_by_route:
+            grouped_by_route[route_key] = []
+        grouped_by_route[route_key].append(item)
 
     embeds = []
 
-    for route, items in grouped.items():
-        direct_items = [f"・**{format_date_with_day(x['date'])}** [直行便]" for x in items if x["direct"]]
-        connect_items = [f"・**{format_date_with_day(x['date'])}** [経由: {x['via']}]" for x in items if not x["direct"]]
+    for route, items in grouped_by_route.items():
+        # 月ごとにグループ化
+        by_month = {}
+        for x in items:
+            ym = x["date"][:7]  # YYYY-MM
+            if ym not in by_month:
+                by_month[ym] = []
+            by_month[ym].append(x)
 
-        lines = []
-        if direct_items:
-            lines.append("✈️ **【直行便 空席日程】**")
-            lines.extend(direct_items[:20])
-            if len(direct_items) > 20:
-                lines.append(f"   (他 {len(direct_items)-20} 日間の直行便空席あり)")
-            lines.append("")
+        current_desc_lines = [f"**【12ヶ月全自動監視確定レポート】総空席件数: {len(items)} 件**\n"]
 
-        if connect_items:
-            lines.append("🔄 **【乗継便 空席日程 (経由便含む)】**")
-            lines.extend(connect_items[:25])
-            if len(connect_items) > 25:
-                lines.append(f"   (他 {len(connect_items)-25} 日間の乗継便空席あり)")
-            lines.append("")
+        for ym in sorted(by_month.keys()):
+            m_items = by_month[ym]
+            ym_formatted = f"📅 **{ym[:4]}年{ym[5:7]}月** ({len(m_items)}件)"
+            
+            date_strings = []
+            for x in m_items:
+                dt_str = format_date_with_day(x["date"])[5:] # MM-DD (曜)
+                if x["direct"]:
+                    date_strings.append(f"`{dt_str}`[直行]")
+                else:
+                    date_strings.append(f"`{dt_str}`[経由:{x['via']}]")
 
-        desc = f"**【12ヶ月全自動監視確定レポート】条件一致 空席: 全 {len(items)} 件**\n\n"
-        desc += "\n".join(lines)
+            month_block = f"{ym_formatted}\n" + " / ".join(date_strings) + "\n"
 
-        notes = list(set([x["note"] for x in items if x["note"]]))
-        if notes:
-            desc += f"\n📝 **備考**: {', '.join(notes)}"
+            # 2000文字の文字数オーバー防止チェック
+            current_text = "\n".join(current_desc_lines)
+            if len(current_text) + len(month_block) > 1800:
+                # 溢れたら一度Embedとして追加
+                embeds.append({
+                    "title": f"✈️ 【United特典空席 12ヶ月全レポート】 {route}",
+                    "color": 5814783,
+                    "description": current_text,
+                    "footer": {"text": "United特典航空券 12ヶ月全自動高速監視システム"},
+                    "timestamp": datetime.utcnow().isoformat() + "Z"
+                })
+                current_desc_lines = [f"**【12ヶ月全自動監視確定レポート】{route} (続き)**\n", month_block]
+            else:
+                current_desc_lines.append(month_block)
 
-        if len(desc) > 1900:
-            desc = desc[:1850] + "\n...(省略)"
+        if current_desc_lines:
+            notes = list(set([x["note"] for x in items if x["note"]]))
+            if notes:
+                current_desc_lines.append(f"\n📝 **備考**: {', '.join(notes)}")
 
-        embeds.append({
-            "title": f"✈️ 【United特典空席 12ヶ月全レポート】 {route}",
-            "color": 5814783,
-            "description": desc,
-            "footer": {"text": "United特典航空券 12ヶ月全自動高速監視システム (必要マイル: 5,500〜7,000マイル)"},
-            "timestamp": datetime.utcnow().isoformat() + "Z"
-        })
+            embeds.append({
+                "title": f"✈️ 【United特典空席 12ヶ月全レポート】 {route}",
+                "color": 5814783,
+                "description": "\n".join(current_desc_lines),
+                "footer": {"text": "United特典航空券 12ヶ月全自動高速監視システム"},
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            })
 
     mention = CONFIG.get("DISCORD_MENTION", "").strip()
 
-    CHUNK_SIZE = 3
+    # DiscordへEmbedを分割送信 (1回のAPIコールにつき最大10 Embeds)
+    CHUNK_SIZE = 5
     for i in range(0, len(embeds), CHUNK_SIZE):
         chunk_embeds = embeds[i:i + CHUNK_SIZE]
         payload = {
@@ -483,13 +501,13 @@ def send_discord_summary_notification(detected_list):
             )
             with urllib.request.urlopen(req, timeout=10) as res:
                 if res.status in [200, 204]:
-                    print(f"🎉 Discord一括通知送信成功 (パート {i//CHUNK_SIZE + 1})")
+                    print(f"🎉 Discord全件一括通知送信成功 (パート {i//CHUNK_SIZE + 1})")
                 else:
                     print(f"⚠️ Discord通知応答ステータス: {res.status}")
         except Exception as e:
             print(f"❌ Discord通知送信エラー: {e}")
 
-    print(f"🎉 条件一致全 {len(cleaned_list)} 件のDiscord通知を完了しました！")
+    print(f"🎉 12ヶ月全件 (計 {len(cleaned_list)} 件) のDiscord通知を完了しました！")
 
 if __name__ == "__main__":
     check_united_seats_free()
