@@ -109,26 +109,28 @@ def is_japanese_holiday(dt):
     return dt.strftime("%Y-%m-%d") in holidays
 
 # ==========================================
-# 日付条件マッチング関数
+# 厳格な日付条件マッチング関数
 # ==========================================
 def matches_date_condition(dt, condition_str):
     if not condition_str or condition_str.strip() in ["すべて", "全日", ""]:
         return True
 
-    day_of_week = dt.weekday()
+    day_of_week = dt.weekday() # 0:月, 1:火, 2:水, 3:木, 4:金, 5:土, 6:日
     date_str = dt.strftime("%Y-%m-%d")
     is_holiday = is_japanese_holiday(dt)
 
     conditions = [c.strip() for c in condition_str.split(",")]
 
     for cond in conditions:
+        if not cond:
+            continue
         if cond == date_str:
             return True
         if cond in ["月", "月曜", "月曜日"] and day_of_week == 0:
             return True
         if cond in ["火", "火曜", "火曜日"] and day_of_week == 1:
             return True
-        if cond in ["水", "水曜", "水曜日"] and day_of_week == 2:
+        if cond in ["水", "水曜", "水曜日"] and day_of_week == 3:
             return True
         if cond in ["木", "木曜", "木曜日"] and day_of_week == 3:
             return True
@@ -154,7 +156,7 @@ def matches_date_condition(dt, condition_str):
     return False
 
 # ==========================================
-# スプレッドシート取得＆パース
+# スプレッドシート取得＆パース (画像と100%完全同一定義)
 # ==========================================
 def get_sheet_targets():
     print("📊 スプレッドシートの設定を取得中...")
@@ -219,22 +221,23 @@ def get_sheet_targets():
         except Exception as e:
             print(f"⚠️ スプレッドシートのパースエラー: {e}")
 
+    # フォールバック処理: お送りいただいた画像と100%一致した厳格設定
     if not targets:
-        print("ℹ️ スプレッドシート全8路線のデフォルト定義を使用します。")
+        print("ℹ️ スプレッドシート画像と100%一致した厳格条件を使用します。")
         targets = [
-            {"row": 2, "origin": "KMJ", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "note": "熊本➔仙台"},
-            {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝,日曜,祝日", "cabin": "エコノミー", "note": "仙台➔熊本"},
-            {"row": 4, "origin": "FUK", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "note": "福岡➔仙台"},
-            {"row": 5, "origin": "SDJ", "destination": "FUK", "date_cond": "日祝,日曜,祝日", "cabin": "エコノミー", "note": "仙台➔福岡"},
-            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-19,すべて", "cabin": "エコノミー", "note": "熊本➔那覇"},
-            {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19,すべて", "cabin": "エコノミー", "note": "那覇➔熊本"},
-            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-19,すべて", "cabin": "エコノミー", "note": "福岡➔那覇"},
-            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19,すべて", "cabin": "エコノミー", "note": "那覇➔福岡"}
+            {"row": 2, "origin": "KMJ", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "note": "熊本➔仙台 (金土日)"},
+            {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "note": "仙台➔熊本 (日祝)"},
+            {"row": 4, "origin": "FUK", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "note": "福岡➔仙台 (金土日)"},
+            {"row": 5, "origin": "SDJ", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "note": "仙台➔福岡 (日祝)"},
+            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-19", "cabin": "エコノミー", "note": "熊本➔那覇 (2027-07-19)"},
+            {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19", "cabin": "エコノミー", "note": "那覇➔熊本 (2027-07-19)"},
+            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-19", "cabin": "エコノミー", "note": "福岡➔那覇 (2027-07-19)"},
+            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19", "cabin": "エコノミー", "note": "那覇➔福岡 (2027-07-19)"}
         ]
 
     print(f"✅ 対象監視ルート全 {len(targets)} 件を読み込みました。")
     for t in targets:
-        print(f"   • {t['origin']} ➡️ {t['destination']} (条件: {t['date_cond']})")
+        print(f"   • {t['origin']} ➡️ {t['destination']} (厳格条件: {t['date_cond']})")
 
     return targets
 
@@ -330,7 +333,7 @@ def check_united_seats_free():
         date_cond = target["date_cond"]
         note = target["note"]
 
-        print(f"\n✈️ 【12ヶ月全期間 監視中】 {origin} ➡️ {destination} (条件: {date_cond})")
+        print(f"\n✈️ 【12ヶ月全期間 厳格条件監視】 {origin} ➡️ {destination} (条件: {date_cond})")
 
         # 1. 直行便のチェック
         direct_map = fetch_ana_route_availability_12months(origin, destination, target_months)
@@ -383,7 +386,7 @@ def check_united_seats_free():
             unique_map[key] = item
 
     cleaned_list = list(unique_map.values())
-    print(f"\n🎯 12ヶ月全期間で検出された全条件一致 United 特典空席: 全 {len(cleaned_list)} 件")
+    print(f"\n🎯 12ヶ月全期間で検出された厳格条件一致 United 特典空席: 全 {len(cleaned_list)} 件")
 
     send_discord_summary_notification(cleaned_list)
     print("🎉 処理が正常完了しました。")
@@ -400,7 +403,7 @@ def format_date_with_day(date_str):
         return date_str
 
 # ==========================================
-# Discord 安全一括まとめ通知送信 (文字数制限・安全分割対応)
+# Discord 安全一括まとめ通知送信
 # ==========================================
 def send_discord_summary_notification(detected_list):
     webhook_url = CONFIG["DISCORD_WEBHOOK_URL"]
@@ -426,20 +429,19 @@ def send_discord_summary_notification(detected_list):
         direct_items = [f"・**{format_date_with_day(x['date'])}** [直行便]" for x in items if x["direct"]]
         connect_items = [f"・**{format_date_with_day(x['date'])}** [経由: {x['via']}]" for x in items if not x["direct"]]
 
-        # Discord 2000文字制限対策: 各路線の上位日程を表示
         lines = []
         if direct_items:
             lines.append("✈️ **【直行便 空席日程】**")
-            lines.extend(direct_items[:15])
-            if len(direct_items) > 15:
-                lines.append(f"   (他 {len(direct_items)-15} 日間の直行便空席あり)")
+            lines.extend(direct_items[:20])
+            if len(direct_items) > 20:
+                lines.append(f"   (他 {len(direct_items)-20} 日間の直行便空席あり)")
             lines.append("")
 
         if connect_items:
-            lines.append("🔄 **【乗継便 空席日程 (伊丹・羽田等経由)】**")
-            lines.extend(connect_items[:20])
-            if len(connect_items) > 20:
-                lines.append(f"   (他 {len(connect_items)-20} 日間の乗継便空席あり)")
+            lines.append("🔄 **【乗継便 空席日程 (経由便含む)】**")
+            lines.extend(connect_items[:25])
+            if len(connect_items) > 25:
+                lines.append(f"   (他 {len(connect_items)-25} 日間の乗継便空席あり)")
             lines.append("")
 
         desc = f"**【12ヶ月全自動監視確定レポート】条件一致 空席: 全 {len(items)} 件**\n\n"
@@ -449,9 +451,8 @@ def send_discord_summary_notification(detected_list):
         if notes:
             desc += f"\n📝 **備考**: {', '.join(notes)}"
 
-        # 2000文字安全カット
         if len(desc) > 1900:
-            desc = desc[:1850] + "\n...(文字数制限のため省略)"
+            desc = desc[:1850] + "\n...(省略)"
 
         embeds.append({
             "title": f"✈️ 【United特典空席 12ヶ月全レポート】 {route}",
@@ -461,10 +462,8 @@ def send_discord_summary_notification(detected_list):
             "timestamp": datetime.utcnow().isoformat() + "Z"
         })
 
-    # Discord 10 Embeds 制限分割送信
     mention = CONFIG.get("DISCORD_MENTION", "").strip()
 
-    # Embedsを3個ずつ安全分割して送信
     CHUNK_SIZE = 3
     for i in range(0, len(embeds), CHUNK_SIZE):
         chunk_embeds = embeds[i:i + CHUNK_SIZE]
@@ -490,7 +489,7 @@ def send_discord_summary_notification(detected_list):
         except Exception as e:
             print(f"❌ Discord通知送信エラー: {e}")
 
-    print(f"🎉 全 {len(cleaned_list)} 件のDiscord通知を完了しました！")
+    print(f"🎉 条件一致全 {len(cleaned_list)} 件のDiscord通知を完了しました！")
 
 if __name__ == "__main__":
     check_united_seats_free()
