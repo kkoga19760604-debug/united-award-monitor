@@ -109,7 +109,7 @@ def is_japanese_holiday(dt):
     return dt.strftime("%Y-%m-%d") in holidays
 
 # ==========================================
-# 厳格な日付条件マッチング関数
+# 厳格な日付＆期間条件マッチング関数 (プルダウン対応)
 # ==========================================
 def matches_date_condition(dt, condition_str):
     if not condition_str or condition_str.strip() in ["すべて", "全日", ""]:
@@ -119,18 +119,26 @@ def matches_date_condition(dt, condition_str):
     date_str = dt.strftime("%Y-%m-%d")
     is_holiday = is_japanese_holiday(dt)
 
+    # ◯月以降の判定 (例: 10月以降, 2026-10月以降)
+    month_match = re.search(r'(\d{1,2})月以降', condition_str)
+    if month_match:
+        target_month = int(month_match.group(1))
+        # 年を考慮し、現在の月との関係または指定月以降かチェック
+        if dt.month < target_month and dt.year == datetime.now().year:
+            return False
+
     conditions = [c.strip() for c in condition_str.split(",")]
 
     for cond in conditions:
         if not cond:
             continue
-        if cond == date_str:
+        if cond == date_str or date_str in cond:
             return True
         if cond in ["月", "月曜", "月曜日"] and day_of_week == 0:
             return True
         if cond in ["火", "火曜", "火曜日"] and day_of_week == 1:
             return True
-        if cond in ["水", "水曜", "水曜日"] and day_of_week == 3:
+        if cond in ["水", "水曜", "水曜日"] and day_of_week == 2:
             return True
         if cond in ["木", "木曜", "木曜日"] and day_of_week == 3:
             return True
@@ -142,21 +150,60 @@ def matches_date_condition(dt, condition_str):
             return True
         if cond in ["祝", "祝日"] and is_holiday:
             return True
-        if cond == "土日" and day_of_week in [5, 6]:
+        if cond in ["土日"] and day_of_week in [5, 6]:
             return True
         if ("日祝" in cond or "日曜・祝日" in cond) and (day_of_week == 6 or is_holiday):
             return True
-        if cond == "金土日" and day_of_week in [4, 5, 6]:
+        if "金土日" in cond and day_of_week in [4, 5, 6]:
             return True
-        if cond == "土日祝" and (day_of_week in [5, 6] or is_holiday):
+        if "土日祝" in cond and (day_of_week in [5, 6] or is_holiday):
             return True
-        if cond == "金土日祝" and (day_of_week in [4, 5, 6] or is_holiday):
+        if "金土日祝" in cond and (day_of_week in [4, 5, 6] or is_holiday):
             return True
 
     return False
 
 # ==========================================
-# スプレッドシート取得＆パース (画像と100%完全同一定義)
+# 希望時間帯判定関数 (プルダウン対応)
+# ==========================================
+def matches_time_condition(flight_time_str, time_condition_str):
+    if not time_condition_str or time_condition_str.strip() in ["全時間帯", "制限なし", "すべて", ""]:
+        return True
+    
+    if not flight_time_str:
+        return True # 時刻データが取れない場合はデフォルト通過
+
+    try:
+        # HH:MM のパース
+        time_match = re.search(r'(\d{1,2}):(\d{2})', flight_time_str)
+        if not time_match:
+            return True
+        
+        hour = int(time_match.group(1))
+
+        cond = time_condition_str.strip()
+        if "午前便" in cond:
+            return hour < 12
+        elif "午後便" in cond:
+            return hour >= 12
+        elif "夕方以降" in cond:
+            return hour >= 17
+        elif "夜便" in cond:
+            return hour >= 19
+        
+        # 数値指定 (例: 17時以降, 18:00以降)
+        custom_hour_match = re.search(r'(\d{1,2})時以降', cond)
+        if custom_hour_match:
+            target_hour = int(custom_hour_match.group(1))
+            return hour >= target_hour
+
+    except Exception:
+        pass
+
+    return True
+
+# ==========================================
+# スプレッドシート取得＆パース (プルダウン対応・拡張版)
 # ==========================================
 def get_sheet_targets():
     print("📊 スプレッドシートの設定を取得中...")
@@ -207,7 +254,11 @@ def get_sheet_targets():
                 destination = extract_airport_code(row[2])
                 date_cond = str(row[3]).strip() if len(row) > 3 else "すべて"
                 cabin = str(row[4]).strip() if len(row) > 4 else "すべて"
-                note = str(row[5]).strip() if len(row) > 5 else ""
+                
+                # プルダウン拡張項目
+                airline = str(row[5]).strip() if len(row) > 5 else "すべて"
+                time_cond = str(row[6]).strip() if len(row) > 6 else "全時間帯"
+                note = str(row[7]).strip() if len(row) > 7 else (row[5] if len(row) == 6 else "")
 
                 if origin and destination:
                     targets.append({
@@ -216,33 +267,35 @@ def get_sheet_targets():
                         "destination": destination,
                         "date_cond": date_cond,
                         "cabin": cabin,
+                        "airline": airline if airline in ["ユナイテッド", "ソラシド", "すべて"] else "すべて",
+                        "time_cond": time_cond,
                         "note": note
                     })
         except Exception as e:
             print(f"⚠️ スプレッドシートのパースエラー: {e}")
 
-    # フォールバック処理: お送りいただいた画像と100%一致した厳格設定
+    # フォールバック処理: スプレッドシート非公開時の標準プルダウン定義
     if not targets:
-        print("ℹ️ スプレッドシート画像と100%一致した厳格条件を使用します。")
+        print("ℹ️ スプレッドシートの標準プルダウン構成を使用します。")
         targets = [
-            {"row": 2, "origin": "KMJ", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "note": "熊本➔仙台 (金土日)"},
-            {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "note": "仙台➔熊本 (日祝)"},
-            {"row": 4, "origin": "FUK", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "note": "福岡➔仙台 (金土日)"},
-            {"row": 5, "origin": "SDJ", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "note": "仙台➔福岡 (日祝)"},
-            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "note": "熊本➔那覇 (2027-07-17)"},
-            {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19", "cabin": "エコノミー", "note": "那覇➔熊本 (2027-07-19)"},
-            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "note": "福岡➔那覇 (2027-07-17)"},
-            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19", "cabin": "エコノミー", "note": "那覇➔福岡 (2027-07-19)"}
+            {"row": 2, "origin": "KMJ", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "熊本➔仙台 (金土日)"},
+            {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "仙台➔熊本 (日祝)"},
+            {"row": 4, "origin": "FUK", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "福岡➔仙台 (金土日)"},
+            {"row": 5, "origin": "SDJ", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "仙台➔福岡 (日祝)"},
+            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "すべて", "time_cond": "全時間帯", "note": "熊本➔那覇 (2027-07-17)"},
+            {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "すべて", "time_cond": "全時間帯", "note": "那覇➔熊本 (2027-07-19)"},
+            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "すべて", "time_cond": "全時間帯", "note": "福岡➔那覇 (2027-07-17)"},
+            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "すべて", "time_cond": "全時間帯", "note": "那覇➔福岡 (2027-07-19)"}
         ]
 
     print(f"✅ 対象監視ルート全 {len(targets)} 件を読み込みました。")
     for t in targets:
-        print(f"   • {t['origin']} ➡️ {t['destination']} (厳格条件: {t['date_cond']})")
+        print(f"   • {t['origin']} ➡️ {t['destination']} (対象: {t['airline']}, 条件: {t['date_cond']}, 時間: {t['time_cond']})")
 
     return targets
 
 # ==========================================
-# 【12ヶ月分・全期間高速確定照会エンジン】
+# 【12ヶ月分・全期間確定照会エンジン】 (ユナイテッド/ANA用)
 # ==========================================
 def fetch_ana_route_availability_12months(dep, arr, target_months):
     availability_map = {}
@@ -294,7 +347,64 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
     return availability_map
 
 # ==========================================
-# メイン実行関数
+# 【12ヶ月分・ソラシドエア照会エンジン】
+# ==========================================
+def fetch_solaseed_route_availability_12months(dep, arr, target_months):
+    """
+    ソラシドエア（Solaseed Air: SNA/SNJ）運航便およびコードシェア枠の12ヶ月通年空席照会
+    """
+    availability_map = {}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Accept": "application/json, text/javascript, */*"
+    }
+
+    def fetch_month(ym_str):
+        # ソラシドエア運航便（ANAコードシェアSNJ便含む）の空席照会
+        url = f"https://www.ana.co.jp/asw/top_dom/asw_top_dom_inquire_round_flight.json?depCode={dep}&arrCode={arr}&searchMonth={ym_str}&carrier=SNJ"
+        month_map = {}
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=8) as res:
+                if res.status == 200:
+                    text = res.read().decode('utf-8', errors='ignore')
+                    try:
+                        data = json.loads(text)
+                        def traverse(o):
+                            if isinstance(o, list):
+                                for item in o:
+                                    traverse(item)
+                            elif isinstance(o, dict):
+                                d_val = o.get("date") or o.get("flightDate") or o.get("ymd")
+                                s_val = o.get("status") or o.get("vacantStatus") or o.get("availability") or o.get("vacant")
+                                carrier = str(o.get("carrier") or o.get("airline") or "").upper()
+                                # ソラシド便(SNJ/SNA)または特定空席ステータスを検出
+                                if d_val and s_val:
+                                    d_str = str(d_val)
+                                    if len(d_str) == 8:
+                                        d_str = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:8]}"
+                                    s_str = str(s_val).upper()
+                                    if any(kw in s_str for kw in ["OK", "LOW", "○", "△", "AVAILABLE", "TRUE"]):
+                                        month_map[d_str] = True
+                                for k, v in o.items():
+                                    traverse(v)
+                        traverse(data)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return month_map
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        futures = {executor.submit(fetch_month, ym): ym for ym in target_months}
+        for future in as_completed(futures):
+            res_map = future.result()
+            availability_map.update(res_map)
+
+    return availability_map
+
+# ==========================================
+# メイン実行関数 (ユナイテッド ＋ ソラシド 統合版)
 # ==========================================
 def check_united_seats_free():
     webhook_url = CONFIG["DISCORD_WEBHOOK_URL"]
@@ -315,7 +425,7 @@ def check_united_seats_free():
         month = (now.month - 1 + m) % 12 + 1
         target_months.append(f"{year}{month:02d}")
 
-    print(f"\n[監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} (計 {len(target_months)} ヶ月分 / 全 {len(targets)} 路線)")
+    print(f"\n[統合自動監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} (計 {len(target_months)} ヶ月分 / 全 {len(targets)} 路線)")
 
     all_detected_seats = []
     hub_airports = CONFIG["HUB_AIRPORTS"]
@@ -324,65 +434,92 @@ def check_united_seats_free():
         origin = target["origin"]
         destination = target["destination"]
         date_cond = target["date_cond"]
+        time_cond = target.get("time_cond", "全時間帯")
+        airline_target = target.get("airline", "すべて")
         note = target["note"]
 
-        print(f"\n✈️ 【12ヶ月全期間 厳格条件監視】 {origin} ➡️ {destination} (条件: {date_cond})")
+        print(f"\n✈️ 【12ヶ月全期間 監視中】 {origin} ➡️ {destination} (対象: {airline_target}, 条件: {date_cond}, 時間: {time_cond})")
 
-        # 1. 直行便のチェック
-        direct_map = fetch_ana_route_availability_12months(origin, destination, target_months)
-        for d_str, avail in direct_map.items():
-            if avail:
-                try:
-                    dt = datetime.strptime(d_str, "%Y-%m-%d")
-                    if dt.date() >= now.date() and matches_date_condition(dt, date_cond):
-                        all_detected_seats.append({
-                            "origin": origin,
-                            "destination": destination,
-                            "date": d_str,
-                            "via": None,
-                            "direct": True,
-                            "note": note
-                        })
-                except Exception:
-                    pass
-
-        # 2. 主要ハブ経由便のチェック
-        for hub in hub_airports:
-            if hub in [origin, destination]:
-                continue
-
-            leg1_map = fetch_ana_route_availability_12months(origin, hub, target_months)
-            leg2_map = fetch_ana_route_availability_12months(hub, destination, target_months)
-
-            found_via_count = 0
-            for d_str, leg1_avail in leg1_map.items():
-                if leg1_avail and leg2_map.get(d_str) is True:
+        # ------------------------------------
+        # 1. ユナイテッド航空 (ANA便) の照会
+        # ------------------------------------
+        if airline_target in ["ユナイテッド", "すべて"]:
+            direct_map = fetch_ana_route_availability_12months(origin, destination, target_months)
+            for d_str, avail in direct_map.items():
+                if avail:
                     try:
                         dt = datetime.strptime(d_str, "%Y-%m-%d")
                         if dt.date() >= now.date() and matches_date_condition(dt, date_cond):
                             all_detected_seats.append({
+                                "airline": "UNITED",
                                 "origin": origin,
                                 "destination": destination,
                                 "date": d_str,
-                                "via": hub,
-                                "direct": False,
+                                "via": None,
+                                "direct": True,
                                 "note": note
                             })
-                            found_via_count += 1
                     except Exception:
                         pass
 
+            # ユナイテッド経由便
+            for hub in hub_airports:
+                if hub in [origin, destination]:
+                    continue
+                leg1_map = fetch_ana_route_availability_12months(origin, hub, target_months)
+                leg2_map = fetch_ana_route_availability_12months(hub, destination, target_months)
+
+                for d_str, leg1_avail in leg1_map.items():
+                    if leg1_avail and leg2_map.get(d_str) is True:
+                        try:
+                            dt = datetime.strptime(d_str, "%Y-%m-%d")
+                            if dt.date() >= now.date() and matches_date_condition(dt, date_cond):
+                                all_detected_seats.append({
+                                    "airline": "UNITED",
+                                    "origin": origin,
+                                    "destination": destination,
+                                    "date": d_str,
+                                    "via": hub,
+                                    "direct": False,
+                                    "note": note
+                                })
+                        except Exception:
+                            pass
+
+        # ------------------------------------
+        # 2. ソラシドエア (Solaseed Air) の照会
+        # ------------------------------------
+        if airline_target in ["ソラシド", "すべて"]:
+            sola_map = fetch_solaseed_route_availability_12months(origin, destination, target_months)
+            for d_str, avail in sola_map.items():
+                if avail:
+                    try:
+                        dt = datetime.strptime(d_str, "%Y-%m-%d")
+                        if dt.date() >= now.date() and matches_date_condition(dt, date_cond):
+                            all_detected_seats.append({
+                                "airline": "SOLASEED",
+                                "origin": origin,
+                                "destination": destination,
+                                "date": d_str,
+                                "via": None,
+                                "direct": True,
+                                "note": note
+                            })
+                    except Exception:
+                        pass
+
+    # 重複排除
     unique_map = {}
     for item in all_detected_seats:
-        key = f"{item['origin']}_{item['destination']}_{item['date']}_{item['via'] or 'DIRECT'}"
+        key = f"{item['airline']}_{item['origin']}_{item['destination']}_{item['date']}_{item['via'] or 'DIRECT'}"
         if key not in unique_map:
             unique_map[key] = item
 
     cleaned_list = list(unique_map.values())
-    print(f"\n🎯 12ヶ月全期間で検出された厳格条件一致 United 特典空席: 全 {len(cleaned_list)} 件")
+    print(f"\n🎯 統合自動監視で検出された厳格条件一致 空席: 全 {len(cleaned_list)} 件")
 
     send_discord_summary_notification(cleaned_list)
-    print("🎉 処理が正常完了しました。")
+    print("🎉 統合監視処理が正常完了しました。")
 
 # ==========================================
 # 日付と曜日のフォーマット
@@ -396,7 +533,7 @@ def format_date_with_day(date_str):
         return date_str
 
 # ==========================================
-# Discord 完全網羅一括通知送信 (12ヶ月分全件通知)
+# Discord 統合一括通知送信 (ユナイテッド / ソラシド 分割Embed)
 # ==========================================
 def send_discord_summary_notification(detected_list):
     webhook_url = CONFIG["DISCORD_WEBHOOK_URL"]
@@ -407,26 +544,34 @@ def send_discord_summary_notification(detected_list):
         print("条件に合う特典空席は見つかりませんでした。")
         return
 
-    cleaned_list = sorted(detected_list, key=lambda x: x["date"])
+    cleaned_list = sorted(detected_list, key=lambda x: (x["airline"], x["date"]))
 
-    # 路線ごとにグループ化
-    grouped_by_route = {}
+    # 航空会社 ＆ 路線ごとにグループ化
+    grouped = {}
     for item in cleaned_list:
-        route_key = f"{item['origin']} ➡️ {item['destination']}"
-        if route_key not in grouped_by_route:
-            grouped_by_route[route_key] = []
-        grouped_by_route[route_key].append(item)
+        group_key = (item["airline"], f"{item['origin']} ➡️ {item['destination']}")
+        if group_key not in grouped:
+            grouped[group_key] = []
+        grouped[group_key].append(item)
 
     embeds = []
 
-    for route, items in grouped_by_route.items():
-        # 月ごとにグループ化
+    for (airline, route), items in grouped.items():
         by_month = {}
         for x in items:
-            ym = x["date"][:7]  # YYYY-MM
+            ym = x["date"][:7]
             if ym not in by_month:
                 by_month[ym] = []
             by_month[ym].append(x)
+
+        if airline == "SOLASEED":
+            title_prefix = "🥑 【ソラシド特典空席 12ヶ月全レポート】"
+            color_val = 4898877 # ソラシドグリーン
+            footer_text = "ソラシドエア 特典航空券 12ヶ月全自動高速監視システム"
+        else:
+            title_prefix = "✈️ 【United特典空席 12ヶ月全レポート】"
+            color_val = 5814783 # ユナイテッドブルー
+            footer_text = "United特典航空券 12ヶ月全自動高速監視システム"
 
         current_desc_lines = [f"**【12ヶ月全自動監視確定レポート】総空席件数: {len(items)} 件**\n"]
 
@@ -436,7 +581,7 @@ def send_discord_summary_notification(detected_list):
             
             date_strings = []
             for x in m_items:
-                dt_str = format_date_with_day(x["date"])[5:] # MM-DD (曜)
+                dt_str = format_date_with_day(x["date"])[5:]
                 if x["direct"]:
                     date_strings.append(f"`{dt_str}`[直行]")
                 else:
@@ -444,15 +589,13 @@ def send_discord_summary_notification(detected_list):
 
             month_block = f"{ym_formatted}\n" + " / ".join(date_strings) + "\n"
 
-            # 2000文字の文字数オーバー防止チェック
             current_text = "\n".join(current_desc_lines)
             if len(current_text) + len(month_block) > 1800:
-                # 溢れたら一度Embedとして追加
                 embeds.append({
-                    "title": f"✈️ 【United特典空席 12ヶ月全レポート】 {route}",
-                    "color": 5814783,
+                    "title": f"{title_prefix} {route}",
+                    "color": color_val,
                     "description": current_text,
-                    "footer": {"text": "United特典航空券 12ヶ月全自動高速監視システム"},
+                    "footer": {"text": footer_text},
                     "timestamp": datetime.utcnow().isoformat() + "Z"
                 })
                 current_desc_lines = [f"**【12ヶ月全自動監視確定レポート】{route} (続き)**\n", month_block]
@@ -465,21 +608,20 @@ def send_discord_summary_notification(detected_list):
                 current_desc_lines.append(f"\n📝 **備考**: {', '.join(notes)}")
 
             embeds.append({
-                "title": f"✈️ 【United特典空席 12ヶ月全レポート】 {route}",
-                "color": 5814783,
+                "title": f"{title_prefix} {route}",
+                "color": color_val,
                 "description": "\n".join(current_desc_lines),
-                "footer": {"text": "United特典航空券 12ヶ月全自動高速監視システム"},
+                "footer": {"text": footer_text},
                 "timestamp": datetime.utcnow().isoformat() + "Z"
             })
 
     mention = CONFIG.get("DISCORD_MENTION", "").strip()
 
-    # DiscordへEmbedを分割送信 (1回のAPIコールにつき最大10 Embeds)
     CHUNK_SIZE = 5
     for i in range(0, len(embeds), CHUNK_SIZE):
         chunk_embeds = embeds[i:i + CHUNK_SIZE]
         payload = {
-            "username": "United特典航空券 監視",
+            "username": "統合特典航空券 監視システム",
             "embeds": chunk_embeds
         }
         if i == 0 and mention:
