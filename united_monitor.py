@@ -229,9 +229,9 @@ def get_sheet_targets():
             {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "note": "仙台➔熊本 (日祝)"},
             {"row": 4, "origin": "FUK", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "note": "福岡➔仙台 (金土日)"},
             {"row": 5, "origin": "SDJ", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "note": "仙台➔福岡 (日祝)"},
-            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-19", "cabin": "エコノミー", "note": "熊本➔那覇 (2027-07-19)"},
+            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "note": "熊本➔那覇 (2027-07-17)"},
             {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19", "cabin": "エコノミー", "note": "那覇➔熊本 (2027-07-19)"},
-            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-19", "cabin": "エコノミー", "note": "福岡➔那覇 (2027-07-19)"},
+            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "note": "福岡➔那覇 (2027-07-17)"},
             {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19", "cabin": "エコノミー", "note": "那覇➔福岡 (2027-07-19)"}
         ]
 
