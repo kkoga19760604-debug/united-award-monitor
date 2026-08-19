@@ -291,13 +291,6 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
             res_map = future.result()
             availability_map.update(res_map)
 
-    today = datetime.now()
-    for d in range(355):
-        dt = today + timedelta(days=d)
-        d_str = dt.strftime("%Y-%m-%d")
-        if d_str not in availability_map:
-            availability_map[d_str] = True
-
     return availability_map
 
 # ==========================================
