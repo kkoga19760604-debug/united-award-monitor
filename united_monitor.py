@@ -217,8 +217,14 @@ def get_sheet_targets():
             import gspread
             from google.oauth2.service_account import Credentials
 
-            scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets.readonly",
+                "https://www.googleapis.com/auth/drive.readonly"
+            ]
             key_dict = json.loads(service_account_json)
+            if "private_key" in key_dict and isinstance(key_dict["private_key"], str):
+                key_dict["private_key"] = key_dict["private_key"].replace("\\n", "\n")
+
             credentials = Credentials.from_service_account_info(key_dict, scopes=scopes)
             gc = gspread.authorize(credentials)
             sh = gc.open_by_key(sheet_id)
@@ -560,7 +566,29 @@ def send_discord_summary_notification(detected_list):
         return
 
     if not detected_list:
-        print("条件に合う特典空席は見つかりませんでした。")
+        print("ℹ️ 条件に合う特典空席は見つかりませんでした。稼働確認レポートをDiscordへ送信します。")
+        payload = {
+            "username": "統合特典航空券 監視システム",
+            "embeds": [{
+                "title": "🟢 【統合自動監視】定期スキャン完了報告",
+                "color": 3066993,
+                "description": "全12ヶ月の自動スキャンが正常に完了いたしました。\n現在、設定された監視条件に合う特典空席は **0 件** です。\nシステムは正常に稼働しており、引き続き1時間ごとに自動監視を継続します。",
+                "footer": {"text": "United ＆ ソラシドエア 統合特典航空券 全自動監視システム"},
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            }]
+        }
+        try:
+            payload_bytes = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(
+                webhook_url,
+                data=payload_bytes,
+                headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as res:
+                if res.status in [200, 204]:
+                    print("🎉 Discord稼働確認通知の送信に成功しました！")
+        except Exception as e:
+            print(f"⚠️ Discord通知送信エラー: {e}")
         return
 
     cleaned_list = sorted(detected_list, key=lambda x: (x["airline"], x["date"]))
