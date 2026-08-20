@@ -668,7 +668,7 @@ def send_discord_summary_notification(detected_list):
             month_block = f"{ym_formatted}\n" + " / ".join(date_strings) + "\n"
 
             current_text = "\n".join(current_desc_lines)
-            if len(current_text) + len(month_block) > 1800:
+            if len(current_text) + len(month_block) > 1400:
                 embeds.append({
                     "title": f"{title_prefix} {route}",
                     "color": color_val,
@@ -695,7 +695,7 @@ def send_discord_summary_notification(detected_list):
 
     mention = CONFIG.get("DISCORD_MENTION", "").strip()
 
-    CHUNK_SIZE = 5
+    CHUNK_SIZE = 2
     for i in range(0, len(embeds), CHUNK_SIZE):
         chunk_embeds = embeds[i:i + CHUNK_SIZE]
         payload = {
@@ -714,11 +714,13 @@ def send_discord_summary_notification(detected_list):
             )
             with urllib.request.urlopen(req, timeout=10) as res:
                 if res.status in [200, 204]:
-                    print(f"🎉 Discord全件一括通知送信成功 (パート {i//CHUNK_SIZE + 1})")
+                    print(f"🎉 Discord全件一括通知送信成功 (パート {i//CHUNK_SIZE + 1} / {(len(embeds)+CHUNK_SIZE-1)//CHUNK_SIZE})")
                 else:
                     print(f"⚠️ Discord通知応答ステータス: {res.status}")
         except Exception as e:
             print(f"❌ Discord通知送信エラー: {e}")
+
+        time.sleep(1)
 
     print(f"🎉 12ヶ月全件 (計 {len(cleaned_list)} 件) のDiscord通知を完了しました！")
 
