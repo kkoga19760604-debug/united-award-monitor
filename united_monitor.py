@@ -371,17 +371,6 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
             except Exception:
                 continue
 
-        # 通信遮断時の安全補填: 国内線通年枠（特典枠）として対象全日付を安全検出対象に保持
-        if not month_map:
-            try:
-                y = int(ym_str[:4])
-                m = int(ym_str[4:6])
-                last_d = 31 if m in [1, 3, 5, 7, 8, 10, 12] else (30 if m in [4, 6, 9, 11] else 28)
-                for d in range(1, last_d + 1):
-                    month_map[f"{y:04d}-{m:02d}-{d:02d}"] = True
-            except Exception:
-                pass
-
         return month_map
 
     with ThreadPoolExecutor(max_workers=12) as executor:
@@ -438,17 +427,6 @@ def fetch_solaseed_route_availability_12months(dep, arr, target_months):
         except Exception:
             pass
 
-        # 補填処理
-        if not month_map:
-            try:
-                y = int(ym_str[:4])
-                m = int(ym_str[4:6])
-                last_d = 31 if m in [1,3,5,7,8,10,12] else (30 if m in [4,6,9,11] else 28)
-                for d in range(1, last_d + 1):
-                    month_map[f"{y:04d}-{m:02d}-{d:02d}"] = True
-            except Exception:
-                pass
-
         return month_map
 
     with ThreadPoolExecutor(max_workers=12) as executor:
@@ -481,7 +459,8 @@ def check_united_seats_free():
         month = (now.month - 1 + m) % 12 + 1
         target_months.append(f"{year}{month:02d}")
 
-    print(f"\n[統合自動監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} (計 {len(target_months)} ヶ月分 / 全 {len(targets)} 路線)")
+    max_bookable_date = now.date() + timedelta(days=355)
+    print(f"\n[統合自動監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} (予約可能枠: 本日から {max_bookable_date} まで / 全 {len(targets)} 路線)")
 
     all_detected_seats = []
     hub_airports = CONFIG["HUB_AIRPORTS"]
@@ -505,7 +484,7 @@ def check_united_seats_free():
                 if avail:
                     try:
                         dt = datetime.strptime(d_str, "%Y-%m-%d")
-                        if dt.date() >= now.date() and matches_date_condition(dt, date_cond):
+                        if now.date() <= dt.date() <= max_bookable_date and matches_date_condition(dt, date_cond):
                             all_detected_seats.append({
                                 "airline": "UNITED",
                                 "origin": origin,
@@ -529,7 +508,7 @@ def check_united_seats_free():
                     if leg1_avail and leg2_map.get(d_str) is True:
                         try:
                             dt = datetime.strptime(d_str, "%Y-%m-%d")
-                            if dt.date() >= now.date() and matches_date_condition(dt, date_cond):
+                            if now.date() <= dt.date() <= max_bookable_date and matches_date_condition(dt, date_cond):
                                 all_detected_seats.append({
                                     "airline": "UNITED",
                                     "origin": origin,
@@ -551,7 +530,7 @@ def check_united_seats_free():
                 if avail:
                     try:
                         dt = datetime.strptime(d_str, "%Y-%m-%d")
-                        if dt.date() >= now.date() and matches_date_condition(dt, date_cond):
+                        if now.date() <= dt.date() <= max_bookable_date and matches_date_condition(dt, date_cond):
                             all_detected_seats.append({
                                 "airline": "SOLASEED",
                                 "origin": origin,
