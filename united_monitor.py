@@ -358,8 +358,8 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
                                         d_str = str(d_val)
                                         if len(d_str) == 8:
                                             d_str = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:8]}"
-                                        s_str = str(s_val).upper()
-                                        if any(kw in s_str for kw in ["OK", "LOW", "○", "△", "AVAILABLE", "TRUE", "1", "2", "3", "4", "5", "6", "7", "8", "9"]):
+                                        s_str = str(s_val).upper().strip()
+                                        if any(kw in s_str for kw in ["OK", "LOW", "○", "△", "AVAILABLE", "VACANT"]) and not any(neg in s_str for neg in ["FULL", "NO", "×", "✕", "満席", "OUT"]):
                                             month_map[d_str] = True
                                     for k, v in o.items():
                                         traverse(v)
@@ -396,36 +396,42 @@ def fetch_solaseed_route_availability_12months(dep, arr, target_months):
     }
 
     def fetch_month(ym_str):
-        url = f"https://www.ana.co.jp/asw/top_dom/asw_top_dom_inquire_round_flight.json?depCode={dep}&arrCode={arr}&searchMonth={ym_str}&carrier=SNJ"
+        urls = [
+            f"https://www.ana.co.jp/asw/top_dom/asw_top_dom_inquire_round_flight.json?depCode={dep}&arrCode={arr}&searchMonth={ym_str}&carrier=SNJ",
+            f"https://www.ana.co.jp/asw/top_dom/asw_top_dom_inquire_round_flight.json?depCode={dep}&arrCode={arr}&searchMonth={ym_str}"
+        ]
         month_map = {}
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=3) as res:
-                if res.status == 200:
-                    text = res.read().decode('utf-8', errors='ignore')
-                    try:
-                        data = json.loads(text)
-                        def traverse(o):
-                            if isinstance(o, list):
-                                for item in o:
-                                    traverse(item)
-                            elif isinstance(o, dict):
-                                d_val = o.get("date") or o.get("flightDate") or o.get("ymd")
-                                s_val = o.get("status") or o.get("vacantStatus") or o.get("availability") or o.get("vacant")
-                                if d_val and s_val:
-                                    d_str = str(d_val)
-                                    if len(d_str) == 8:
-                                        d_str = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:8]}"
-                                    s_str = str(s_val).upper()
-                                    if any(kw in s_str for kw in ["OK", "LOW", "○", "△", "AVAILABLE", "TRUE", "1", "2", "3", "4", "5"]):
-                                        month_map[d_str] = True
-                                for k, v in o.items():
-                                    traverse(v)
-                        traverse(data)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        for url in urls:
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=3) as res:
+                    if res.status == 200:
+                        text = res.read().decode('utf-8', errors='ignore')
+                        try:
+                            data = json.loads(text)
+                            def traverse(o):
+                                if isinstance(o, list):
+                                    for item in o:
+                                        traverse(item)
+                                elif isinstance(o, dict):
+                                    d_val = o.get("date") or o.get("flightDate") or o.get("ymd")
+                                    s_val = o.get("status") or o.get("vacantStatus") or o.get("availability") or o.get("vacant")
+                                    if d_val and s_val:
+                                        d_str = str(d_val)
+                                        if len(d_str) == 8:
+                                            d_str = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:8]}"
+                                        s_str = str(s_val).upper().strip()
+                                        if any(kw in s_str for kw in ["OK", "LOW", "○", "△", "AVAILABLE", "VACANT"]) and not any(neg in s_str for neg in ["FULL", "NO", "×", "✕", "満席", "OUT"]):
+                                            month_map[d_str] = True
+                                    for k, v in o.items():
+                                        traverse(v)
+                            traverse(data)
+                            if month_map:
+                                break
+                        except Exception:
+                            pass
+            except Exception:
+                continue
 
         return month_map
 
