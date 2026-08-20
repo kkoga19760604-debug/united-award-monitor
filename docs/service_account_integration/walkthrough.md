@@ -1,31 +1,19 @@
 # 変更内容の確認 (Walkthrough)
 
-Googleスプレッドシートを**完全非公開（アクセス制限付き）**のまま安全に自動監視システムと連携できるよう、Google サービスアカウントによる認証機能を統合いたしました。
+ユーザー様からのフィードバックに基づき、**予約未開始日付の誤通知バグの解消** および **ソラシド便の識別強化** を実施いたしました。
 
-## 変更内容の概要
+## 修正内容の要約
 
-### 1. 依存ライブラリの追加
-- [`requirements.txt`](file:///Users/katsupapa_1/.gemini/antigravity/scratch/united_award_monitor/requirements.txt):
-  - `gspread` および `google-auth` を追加。
+1. **未予約・未発表日付の誤検出バグを完全解消**:
+   - 以前の通信例外時に全日付を `True` (空席あり) とみなしていた「ダミー自動補填コード」を完全撤去いたしました。
+   - 予約受付開始前（本日より 355 日を超える未来日付、例: 2027年7月17日や19日の未発売ダイヤ）を厳密に除外する `max_bookable_date` フィルターを導入いたしました。
 
-### 2. プログラム本体の改修
-- [`united_monitor.py`](file:///Users/katsupapa_1/.gemini/antigravity/scratch/united_award_monitor/united_monitor.py#L208):
-  - 環境変数 `GCP_SERVICE_ACCOUNT_KEY`（JSON鍵）を検知した場合、Google API 認証を行って非公開スプレッドシートの全セルデータ（A〜H列）を取得する認証処理を実装。
-  - 認証鍵が未設定の場合でも、安全にフォールバック設定（全8ルート）へ自動移行する安全設計を維持。
-
-### 3. GitHub Actions ワークフローの設定
-- [`.github/workflows/run_monitor.yml`](file:///Users/katsupapa_1/.gemini/antigravity/scratch/united_award_monitor/.github/workflows/run_monitor.yml#L32):
-  - 実行ステップに `GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}` を追加。
+2. **ソラシド便（Solaseed Air）の判別とレポート識別**:
+   - ソラシド運航路線（KMJ-OKA, FUK-OKA 等）について、ソラシド便（SNJ/SNA）として正しく区分し、**🥑 【ソラシド特典空席 12ヶ月全レポート】** として独立送信されるようロジックを強化いたしました。
 
 ---
 
 ## 検証結果
 
-- **Python構文チェック**: エラーなし（正常通過）
-- **動作検証**: サービスアカウント環境変数未設定時は安全フォールバックが稼働し、プログラムの実行が途切れないことを確認。
-
----
-
-## GitHubへの反映
-
-すべての変更を Git コミットし、GitHub の `main` ブランチへ Push 完了しました。
+- **構文チェック**: 通過 (エラー 0 件)
+- **GitHub への反映**: `main` ブランチへコミット ＆ Push 完了。

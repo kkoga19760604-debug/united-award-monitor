@@ -307,10 +307,10 @@ def get_sheet_targets():
             {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "仙台➔熊本 (日祝)"},
             {"row": 4, "origin": "FUK", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "福岡➔仙台 (金土日)"},
             {"row": 5, "origin": "SDJ", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "仙台➔福岡 (日祝)"},
-            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "すべて", "time_cond": "全時間帯", "note": "熊本➔那覇 (2027-07-17)"},
-            {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "すべて", "time_cond": "全時間帯", "note": "那覇➔熊本 (2027-07-19)"},
-            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "すべて", "time_cond": "全時間帯", "note": "福岡➔那覇 (2027-07-17)"},
-            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "すべて", "time_cond": "全時間帯", "note": "那覇➔福岡 (2027-07-19)"}
+            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ソラシド", "time_cond": "全時間帯", "note": "熊本➔那覇 (ソラシド・予約受付中期間)"},
+            {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ソラシド", "time_cond": "全時間帯", "note": "那覇➔熊本 (ソラシド・予約受付中期間)"},
+            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ソラシド", "time_cond": "全時間帯", "note": "福岡➔那覇 (ソラシド・予約受付中期間)"},
+            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ソラシド", "time_cond": "全時間帯", "note": "那覇➔福岡 (ソラシド・予約受付中期間)"}
         ]
 
     print(f"✅ 対象監視ルート全 {len(targets)} 件を読み込みました。")
@@ -460,7 +460,8 @@ def check_united_seats_free():
         target_months.append(f"{year}{month:02d}")
 
     max_bookable_date = now.date() + timedelta(days=355)
-    print(f"\n[統合自動監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} (予約可能枠: 本日から {max_bookable_date} まで / 全 {len(targets)} 路線)")
+    max_solaseed_date = now.date() + timedelta(days=210) # ソラシドエアの受付開始枠上限
+    print(f"\n[統合自動監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} (予約可能枠: ANA/UAは{max_bookable_date}まで, ソラシドは{max_solaseed_date}まで / 全 {len(targets)} 路線)")
 
     all_detected_seats = []
     hub_airports = CONFIG["HUB_AIRPORTS"]
@@ -530,7 +531,7 @@ def check_united_seats_free():
                 if avail:
                     try:
                         dt = datetime.strptime(d_str, "%Y-%m-%d")
-                        if now.date() <= dt.date() <= max_bookable_date and matches_date_condition(dt, date_cond):
+                        if now.date() <= dt.date() <= max_solaseed_date and matches_date_condition(dt, date_cond):
                             all_detected_seats.append({
                                 "airline": "SOLASEED",
                                 "origin": origin,
