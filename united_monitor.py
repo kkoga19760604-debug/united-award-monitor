@@ -208,41 +208,60 @@ def matches_time_condition(flight_time_str, time_condition_str):
 def get_sheet_targets():
     print("📊 スプレッドシートの設定を取得中...")
     sheet_id = CONFIG["SPREADSHEET_ID"]
-    
-    candidate_urls = [
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv",
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv",
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/pub?output=csv",
-        f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0"
-    ]
+    rows = None
 
-    csv_text = None
-    for url in candidate_urls:
+    # ★ 優先度1: GCPサービスアカウント(JSON鍵)による非公開スプレッドシートの認証取得
+    service_account_json = os.environ.get("GCP_SERVICE_ACCOUNT_KEY")
+    if service_account_json and service_account_json.strip():
         try:
-            req = urllib.request.Request(
-                url,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-                    "Accept": "text/csv,text/plain,*/*"
-                }
-            )
-            with urllib.request.urlopen(req, timeout=10) as res:
-                if res.status == 200:
-                    text = res.read().decode('utf-8-sig', errors='ignore')
-                    if "<html" not in text.lower() and len(text) > 10:
-                        csv_text = text
-                        print(f"✅ スプレッドシート取得成功 (URL: {url[:60]}...)")
-                        break
-        except Exception:
-            continue
+            import gspread
+            from google.oauth2.service_account import Credentials
+
+            scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+            key_dict = json.loads(service_account_json)
+            credentials = Credentials.from_service_account_info(key_dict, scopes=scopes)
+            gc = gspread.authorize(credentials)
+            sh = gc.open_by_key(sheet_id)
+            worksheet = sh.get_worksheet(0)
+            rows = worksheet.get_all_values()
+            print("✅ GCP サービスアカウント認証による非公開スプレッドシート取得成功！")
+        except Exception as e:
+            print(f"⚠️ サービスアカウントによるスプレッドシート取得失敗: {e}")
+
+    # ★ 優先度2: 公開CSV URL試行 (サービスアカウントが未設定または失敗時)
+    if not rows:
+        candidate_urls = [
+            f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv",
+            f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv",
+            f"https://docs.google.com/spreadsheets/d/{sheet_id}/pub?output=csv",
+            f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0"
+        ]
+
+        for url in candidate_urls:
+            try:
+                req = urllib.request.Request(
+                    url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                        "Accept": "text/csv,text/plain,*/*"
+                    }
+                )
+                with urllib.request.urlopen(req, timeout=10) as res:
+                    if res.status == 200:
+                        text = res.read().decode('utf-8-sig', errors='ignore')
+                        if "<html" not in text.lower() and len(text) > 10:
+                            reader = csv.reader(io.StringIO(text))
+                            rows = list(reader)
+                            print(f"✅ スプレッドシート取得成功 (URL: {url[:60]}...)")
+                            break
+            except Exception:
+                continue
 
     targets = []
-    if csv_text:
+    if rows:
         try:
-            reader = csv.reader(io.StringIO(csv_text))
-            rows = list(reader)
-            
             for i, row in enumerate(rows[1:], start=2):
+
                 if len(row) < 3:
                     continue
                 

@@ -29,6 +29,7 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           UNITED_COOKIE: ${{ secrets.UNITED_COOKIE }}
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
           DISCORD_MENTION: "@everyone"
         run: |
           python united_monitor.py
