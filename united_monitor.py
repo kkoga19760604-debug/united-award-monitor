@@ -573,7 +573,7 @@ def check_united_seats_free():
                 if avail:
                     try:
                         dt = datetime.strptime(d_str, "%Y-%m-%d")
-                        if now.date() <= dt.date() <= max_solaseed_date and matches_date_condition(dt, date_cond):
+                        if now.date() <= dt.date() <= max_bookable_date and matches_date_condition(dt, date_cond):
                             all_detected_seats.append({
                                 "airline": "SOLASEED",
                                 "origin": origin,
