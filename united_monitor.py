@@ -596,7 +596,7 @@ def check_united_seats_free():
     cleaned_list = list(unique_map.values())
     print(f"\n🎯 統合自動監視で検出された厳格条件一致 空席: 全 {len(cleaned_list)} 件")
 
-    send_discord_summary_notification(cleaned_list)
+    send_discord_summary_notification(cleaned_list, targets)
     print("🎉 統合監視処理が正常完了しました。")
 
 # ==========================================
@@ -613,19 +613,34 @@ def format_date_with_day(date_str):
 # ==========================================
 # Discord 統合一括通知送信 (ユナイテッド / ソラシド 分割Embed)
 # ==========================================
-def send_discord_summary_notification(detected_list):
+def send_discord_summary_notification(detected_list, targets=None):
     webhook_url = CONFIG["DISCORD_WEBHOOK_URL"]
     if not webhook_url:
         return
 
     if not detected_list:
-        print("ℹ️ 条件に合う特典空席は見つかりませんでした。稼働確認レポートをDiscordへ送信します。")
+        print("ℹ️ 条件に合う特典空席は見つかりませんでした。詳細稼働確認レポートをDiscordへ送信します。")
+        route_lines = []
+        if targets:
+            for t in targets:
+                airline_icon = "✈️ ユナイテッド" if t.get("airline") == "ユナイテッド" else ("🥑 ソラシド" if t.get("airline") == "ソラシド" else "🌐 すべて")
+                route_lines.append(f"• **{t['origin']} ➡️ {t['destination']}** [{airline_icon}] ({t['date_cond']}, {t.get('time_cond', '全時間帯')}) - {t.get('note', '')}")
+
+        routes_str = "\n".join(route_lines) if route_lines else "設定路線一覧"
+        desc = (
+            "全12ヶ月の自動スキャンが正常に完了いたしました。\n"
+            "現在、設定された監視条件に合う特典空席は **0 件** です。\n\n"
+            f"📋 **本回 スキャン実施路線一覧 (全 {len(targets) if targets else 0} 路線):**\n"
+            f"{routes_str}\n\n"
+            "システムは正常に稼働しており、引き続き1時間ごとに全自動監視を継続します。"
+        )
+
         payload = {
             "username": "統合特典航空券 監視システム",
             "embeds": [{
                 "title": "🟢 【統合自動監視】定期スキャン完了報告",
                 "color": 3066993,
-                "description": "全12ヶ月の自動スキャンが正常に完了いたしました。\n現在、設定された監視条件に合う特典空席は **0 件** です。\nシステムは正常に稼働しており、引き続き1時間ごとに自動監視を継続します。",
+                "description": desc,
                 "footer": {"text": "United ＆ ソラシドエア 統合特典航空券 全自動監視システム"},
                 "timestamp": datetime.utcnow().isoformat() + "Z"
             }]
