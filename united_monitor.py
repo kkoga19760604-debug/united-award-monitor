@@ -329,14 +329,14 @@ def get_sheet_targets():
     if not targets:
         print("ℹ️ スプレッドシートの標準プルダウン構成を使用します。")
         targets = [
-            {"row": 2, "origin": "KMJ", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "熊本➔仙台 (金土日)"},
-            {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "仙台➔熊本 (日祝)"},
-            {"row": 4, "origin": "FUK", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "福岡➔仙台 (金土日)"},
-            {"row": 5, "origin": "SDJ", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "仙台➔福岡 (日祝)"},
-            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ソラシド", "time_cond": "全時間帯", "note": "熊本➔那覇 (ソラシド・予約受付中期間)"},
-            {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ソラシド", "time_cond": "全時間帯", "note": "那覇➔熊本 (ソラシド・予約受付中期間)"},
-            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ソラシド", "time_cond": "全時間帯", "note": "福岡➔那覇 (ソラシド・予約受付中期間)"},
-            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ソラシド", "time_cond": "全時間帯", "note": "那覇➔福岡 (ソラシド・予約受付中期間)"}
+            {"row": 2, "origin": "KMJ", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "熊本➔仙台 (ユナイテッド・金土日)"},
+            {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "仙台➔熊本 (ユナイテッド・日祝)"},
+            {"row": 4, "origin": "FUK", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "福岡➔仙台 (ユナイテッド・金土日)"},
+            {"row": 5, "origin": "SDJ", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "仙台➔福岡 (ユナイテッド・日祝)"},
+            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "熊本➔那覇 (ユナイテッド・金土日)"},
+            {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "那覇➔熊本 (ユナイテッド・日祝)"},
+            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "福岡➔那覇 (ユナイテッド・金土日)"},
+            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "那覇➔福岡 (ユナイテッド・日祝)"}
         ]
 
     print(f"✅ 対象監視ルート全 {len(targets)} 件を読み込みました。")
@@ -509,11 +509,15 @@ def check_united_seats_free():
         print(f"\n✈️ 【12ヶ月全期間 監視中】 {origin} ➡️ {destination} (対象: {airline_target}, 条件: {date_cond}, 時間: {time_cond})")
 
         # ------------------------------------
-        # 1. ユナイテッド航空 (ANA便) の照会
+        # 1. ユナイテッド航空 (ANA便 ＆ ソラシドコードシェア便) の照会
         # ------------------------------------
         if airline_target in ["ユナイテッド", "すべて"]:
             direct_map = fetch_ana_route_availability_12months(origin, destination, target_months)
-            for d_str, avail in direct_map.items():
+            sola_map = fetch_solaseed_route_availability_12months(origin, destination, target_months)
+            
+            combined_direct_map = {**direct_map, **sola_map}
+
+            for d_str, avail in combined_direct_map.items():
                 if avail:
                     try:
                         dt = datetime.strptime(d_str, "%Y-%m-%d")
@@ -555,9 +559,9 @@ def check_united_seats_free():
                             pass
 
         # ------------------------------------
-        # 2. ソラシドエア (Solaseed Air) の照会
+        # 2. ソラシドエア自社・独立特典 (Solaseed Air) の照会
         # ------------------------------------
-        if airline_target in ["ソラシド", "すべて"]:
+        if airline_target == "ソラシド":
             sola_map = fetch_solaseed_route_availability_12months(origin, destination, target_months)
             for d_str, avail in sola_map.items():
                 if avail:
