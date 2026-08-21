@@ -224,7 +224,10 @@ def get_sheet_targets():
             ]
 
             raw_str = service_account_json.strip()
-            # もし Base64 エンコードされている場合の自動デコード
+            if raw_str.startswith('"') and raw_str.endswith('"'):
+                raw_str = raw_str[1:-1]
+            raw_str = raw_str.replace('\\\\n', '\n').replace('\\n', '\n')
+
             if not raw_str.startswith("{"):
                 try:
                     decoded = base64.b64decode(raw_str).decode('utf-8')
@@ -235,20 +238,14 @@ def get_sheet_targets():
 
             key_dict = json.loads(raw_str)
             if "private_key" in key_dict and isinstance(key_dict["private_key"], str):
-                pk = key_dict["private_key"]
-                # エスケープされた改行の置換
-                pk = pk.replace("\\n", "\n")
-                
-                # PEMヘッダー/フッターと改行の整形
+                pk = key_dict["private_key"].replace('\\n', '\n')
                 header = "-----BEGIN PRIVATE KEY-----"
                 footer = "-----END PRIVATE KEY-----"
                 if header in pk and footer in pk:
-                    # ヘッダーとフッターの間を取り出し、改行やスペースを整理して整形
-                    core = pk.split(header)[1].split(footer)[0].replace(" ", "").replace("\n", "").replace("\r", "")
-                    # 64文字ごとに改行を入れるPEM標準整形
-                    chunks = [core[i:i+64] for i in range(0, len(core), 64)]
+                    # ヘッダーとフッターの間を取り出し、改行やスペースを一切取り除いて標準PEM組み立て
+                    content = pk.split(header)[1].split(footer)[0].replace(" ", "").replace("\n", "").replace("\r", "").replace("\t", "")
+                    chunks = [content[i:i+64] for i in range(0, len(content), 64)]
                     pk = f"{header}\n" + "\n".join(chunks) + f"\n{footer}\n"
-                
                 key_dict["private_key"] = pk
 
             credentials = Credentials.from_service_account_info(key_dict, scopes=scopes)
@@ -256,7 +253,7 @@ def get_sheet_targets():
             sh = gc.open_by_key(sheet_id)
             worksheet = sh.get_worksheet(0)
             rows = worksheet.get_all_values()
-            print("✅ GCP サービスアカウント認証による非公開スプレッドシート取得成功！")
+            print(f"✅ GCP サービスアカウント認証成功！ (スプレッドシート: {sh.title}, 全 {len(rows)} 行)")
         except Exception as e:
             print(f"⚠️ サービスアカウントによるスプレッドシート取得失敗: {e}")
 
@@ -325,18 +322,20 @@ def get_sheet_targets():
         except Exception as e:
             print(f"⚠️ スプレッドシートのパースエラー: {e}")
 
-    # フォールバック処理: スプレッドシート非公開時の標準プルダウン定義
+    # フォールバック処理: スプレッドシート非公開時の標準プルダウン定義 (ユーザー様の実データ10行完全再現)
     if not targets:
         print("ℹ️ スプレッドシートの標準プルダウン構成を使用します。")
         targets = [
-            {"row": 2, "origin": "KMJ", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "熊本➔仙台 (ユナイテッド・金土日)"},
-            {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "仙台➔熊本 (ユナイテッド・日祝)"},
-            {"row": 4, "origin": "FUK", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "福岡➔仙台 (ユナイテッド・金土日)"},
-            {"row": 5, "origin": "SDJ", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "仙台➔福岡 (ユナイテッド・日祝)"},
-            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "熊本➔那覇 (ユナイテッド・金土日)"},
-            {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "那覇➔熊本 (ユナイテッド・日祝)"},
-            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "福岡➔那覇 (ユナイテッド・金土日)"},
-            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "那覇➔福岡 (ユナイテッド・日祝)"}
+            {"row": 2, "origin": "KMJ", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "熊本→仙台"},
+            {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "仙台→熊本"},
+            {"row": 4, "origin": "FUK", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "福岡→仙台"},
+            {"row": 5, "origin": "SDJ", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "仙台→福岡"},
+            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "熊本→那覇"},
+            {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "那覇→熊本"},
+            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "福岡→那覇"},
+            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "那覇→福岡"},
+            {"row": 10, "origin": "KMJ", "destination": "HND", "date_cond": "土日", "cabin": "エコノミー", "airline": "ソラシド", "time_cond": "午前便", "note": "熊本→東京"},
+            {"row": 11, "origin": "HND", "destination": "KMJ", "date_cond": "土日", "cabin": "エコノミー", "airline": "ソラシド", "time_cond": "夕方以降", "note": "東京→熊本"}
         ]
 
     print(f"✅ 対象監視ルート全 {len(targets)} 件を読み込みました。")
@@ -385,7 +384,9 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
                                         if len(d_str) == 8:
                                             d_str = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:8]}"
                                         s_str = str(s_val).upper().strip()
-                                        if any(kw in s_str for kw in ["OK", "LOW", "○", "△", "AVAILABLE", "VACANT"]) and not any(neg in s_str for neg in ["FULL", "NO", "×", "✕", "満席", "OUT"]):
+                                        valid_keywords = ["OK", "LOW", "FEW", "○", "△", "AVAILABLE", "VACANT", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+                                        neg_keywords = ["FULL", "NO", "×", "✕", "満席", "OUT", "0", "NONE"]
+                                        if any(kw in s_str for kw in valid_keywords) and not any(neg == s_str or neg in s_str for neg in neg_keywords):
                                             month_map[d_str] = True
                                     for k, v in o.items():
                                         traverse(v)
@@ -447,7 +448,9 @@ def fetch_solaseed_route_availability_12months(dep, arr, target_months):
                                         if len(d_str) == 8:
                                             d_str = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:8]}"
                                         s_str = str(s_val).upper().strip()
-                                        if any(kw in s_str for kw in ["OK", "LOW", "○", "△", "AVAILABLE", "VACANT"]) and not any(neg in s_str for neg in ["FULL", "NO", "×", "✕", "満席", "OUT"]):
+                                        valid_keywords = ["OK", "LOW", "FEW", "○", "△", "AVAILABLE", "VACANT", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+                                        neg_keywords = ["FULL", "NO", "×", "✕", "満席", "OUT", "0", "NONE"]
+                                        if any(kw in s_str for kw in valid_keywords) and not any(neg == s_str or neg in s_str for neg in neg_keywords):
                                             month_map[d_str] = True
                                     for k, v in o.items():
                                         traverse(v)
