@@ -215,15 +215,41 @@ def get_sheet_targets():
     if service_account_json and service_account_json.strip():
         try:
             import gspread
+            import base64
             from google.oauth2.service_account import Credentials
 
             scopes = [
                 "https://www.googleapis.com/auth/spreadsheets.readonly",
                 "https://www.googleapis.com/auth/drive.readonly"
             ]
-            key_dict = json.loads(service_account_json)
+
+            raw_str = service_account_json.strip()
+            # もし Base64 エンコードされている場合の自動デコード
+            if not raw_str.startswith("{"):
+                try:
+                    decoded = base64.b64decode(raw_str).decode('utf-8')
+                    if decoded.startswith("{"):
+                        raw_str = decoded
+                except Exception:
+                    pass
+
+            key_dict = json.loads(raw_str)
             if "private_key" in key_dict and isinstance(key_dict["private_key"], str):
-                key_dict["private_key"] = key_dict["private_key"].replace("\\n", "\n")
+                pk = key_dict["private_key"]
+                # エスケープされた改行の置換
+                pk = pk.replace("\\n", "\n")
+                
+                # PEMヘッダー/フッターと改行の整形
+                header = "-----BEGIN PRIVATE KEY-----"
+                footer = "-----END PRIVATE KEY-----"
+                if header in pk and footer in pk:
+                    # ヘッダーとフッターの間を取り出し、改行やスペースを整理して整形
+                    core = pk.split(header)[1].split(footer)[0].replace(" ", "").replace("\n", "").replace("\r", "")
+                    # 64文字ごとに改行を入れるPEM標準整形
+                    chunks = [core[i:i+64] for i in range(0, len(core), 64)]
+                    pk = f"{header}\n" + "\n".join(chunks) + f"\n{footer}\n"
+                
+                key_dict["private_key"] = pk
 
             credentials = Credentials.from_service_account_info(key_dict, scopes=scopes)
             gc = gspread.authorize(credentials)
