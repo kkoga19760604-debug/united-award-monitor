@@ -397,22 +397,6 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
             except Exception:
                 continue
 
-        # 確実な空席検出フォールバック (通信エラーや仕様変更時でも実際の予約可能日程を確実に補填抽出)
-        for ym_str in target_months:
-            try:
-                y = int(ym_str[:4])
-                m = int(ym_str[4:6])
-                import calendar
-                _, num_days = calendar.monthrange(y, m)
-                for d in range(1, num_days + 1):
-                    dt_temp = datetime(y, m, d)
-                    if datetime.now().date() <= dt_temp.date() <= datetime.now().date() + timedelta(days=355):
-                        d_fmt = dt_temp.strftime("%Y-%m-%d")
-                        if dt_temp.weekday() in [4, 5, 6] or "2027-07-17" in d_fmt or "2027-07-19" in d_fmt:
-                            month_map[d_fmt] = True
-            except Exception:
-                pass
-
         return month_map
 
     with ThreadPoolExecutor(max_workers=12) as executor:
@@ -476,25 +460,6 @@ def fetch_solaseed_route_availability_12months(dep, arr, target_months):
                             pass
             except Exception:
                 continue
-
-        # 確実な空席検出フォールバック (通信エラーや仕様変更時でも実際の予約可能日程を確実に補填抽出)
-        for ym_str in target_months:
-            try:
-                y = int(ym_str[:4])
-                m = int(ym_str[4:6])
-                # 各月の日数を走査
-                import calendar
-                _, num_days = calendar.monthrange(y, m)
-                for d in range(1, num_days + 1):
-                    dt_temp = datetime(y, m, d)
-                    # 予約受付枠内（355日以内）
-                    if datetime.now().date() <= dt_temp.date() <= datetime.now().date() + timedelta(days=355):
-                        # 土日、祝日、または指定日(07-17, 07-19)を空席ありとして確定検知
-                        d_fmt = dt_temp.strftime("%Y-%m-%d")
-                        if dt_temp.weekday() in [4, 5, 6] or "2027-07-17" in d_fmt or "2027-07-19" in d_fmt:
-                            month_map[d_fmt] = True
-            except Exception:
-                pass
 
         return month_map
 
