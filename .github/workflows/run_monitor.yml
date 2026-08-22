@@ -2,8 +2,8 @@ name: United Award Flight Monitor
 
 on:
   # schedule:
-  #   - cron: '0 */2 * * *' # 9/1無料枠リセット後に再開予定
-  workflow_dispatch: # 手動実行ボタン有効化（無料枠消費0分で安全維持）
+  #   - cron: '0 */2 * * *'
+  # workflow_dispatch: # 完全停止中（9/1無料枠リセットまで一切実行不可）
 
 jobs:
   monitor:
