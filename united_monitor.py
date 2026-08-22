@@ -363,6 +363,11 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
         "Referer": "https://www.ana.co.jp/"
     }
 
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
     def fetch_month(ym_str):
         urls = [
             f"https://www.ana.co.jp/asw/top_dom/asw_top_dom_inquire_round_flight.json?depCode={dep}&arrCode={arr}&searchMonth={ym_str}"
@@ -371,7 +376,7 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
         for url in urls:
             try:
                 req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=3) as res:
+                with urllib.request.urlopen(req, context=ctx, timeout=5) as res:
                     if res.status == 200:
                         text = res.read().decode('utf-8', errors='ignore')
                         try:
@@ -390,6 +395,10 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
                                         s_str = str(s_val).upper().strip()
                                         valid_keywords = ["OK", "LOW", "FEW", "○", "△", "AVAILABLE", "VACANT", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
                                         neg_keywords = ["FULL", "NO", "×", "✕", "満席", "OUT", "0", "NONE"]
+                                        if any(kw in s_str for kw in valid_keywords) and not any(neg == s_str or neg in s_str for neg in neg_keywords):
+                                            month_map[d_str] = True
+                                    for k, v in o.items():
+                                        traverse(v)
                             traverse(data)
                             if month_map:
                                 break
@@ -422,6 +431,11 @@ def fetch_solaseed_route_availability_12months(dep, arr, target_months):
         "Referer": "https://www.ana.co.jp/"
     }
 
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
     def fetch_month(ym_str):
         urls = [
             f"https://www.ana.co.jp/asw/top_dom/asw_top_dom_inquire_round_flight.json?depCode={dep}&arrCode={arr}&searchMonth={ym_str}&carrier=SNJ",
@@ -431,7 +445,7 @@ def fetch_solaseed_route_availability_12months(dep, arr, target_months):
         for url in urls:
             try:
                 req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=3) as res:
+                with urllib.request.urlopen(req, context=ctx, timeout=5) as res:
                     if res.status == 200:
                         text = res.read().decode('utf-8', errors='ignore')
                         try:
