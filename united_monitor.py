@@ -615,7 +615,50 @@ def send_discord_summary_notification(detected_list, targets=None):
         return
 
     if not detected_list:
-        print("ℹ️ 条件に合う特典空席は見つかりませんでした。（空席0件のためDiscord通知は送信しません）")
+        print("📊 条件に合う特典空席は0件でした。全10路線の最新調査結果レポートをDiscordへ送信します。")
+        route_lines = []
+        if targets:
+            for t in targets:
+                airline_icon = "✈️ ユナイテッド" if t.get("airline") == "ユナイテッド" else ("🥑 ソラシド" if t.get("airline") == "ソラシド" else "🌐 すべて")
+                time_info = f" ({t.get('time_cond', '全時間帯')})" if t.get('time_cond') else ""
+                route_lines.append(
+                    f"• **{t['origin']} ➡️ {t['destination']}** [{airline_icon}]\n"
+                    f"  └ 条件: `{t['date_cond']}`{time_info} / 結果: **空席 0 件**"
+                )
+
+        routes_str = "\n".join(route_lines) if route_lines else "設定路線一覧"
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        desc = (
+            f"🔍 **スプレッドシート定義全 {len(targets) if targets else 0} 路線の最新空席調査結果 ({now_str})**\n\n"
+            "今月から12ヶ月先（最大355日先まで）の全全便・経由便を完全照会調査いたしました。\n"
+            "現時点でご指定の条件に一致する空席は **0 件** です。\n\n"
+            "📋 **【各路線の最新調査結果一覧】**\n"
+            f"{routes_str}\n\n"
+            "※新しい空席枠が解放され次第、本チャットに即時レポートが届きます。"
+        )
+
+        payload = {
+            "username": "統合特典航空券 監視システム",
+            "embeds": [{
+                "title": "📊 【特典航空券】全10路線 最新空席調査結果レポート",
+                "color": 3447003, # ネイビーブルー
+                "description": desc,
+                "footer": {"text": "United ＆ ソラシドエア 統合特典航空券 全自動高速監視システム"},
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            }]
+        }
+        try:
+            payload_bytes = json.dumps(payload).encode('utf-8')
+            req = urllib.request.Request(
+                webhook_url,
+                data=payload_bytes,
+                headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as res:
+                if res.status in [200, 204]:
+                    print("🎉 最新空席調査結果レポートのDiscord送信に成功しました！")
+        except Exception as e:
+            print(f"⚠️ Discord通知送信エラー: {e}")
         return
 
     cleaned_list = sorted(detected_list, key=lambda x: (x["airline"], x["date"]))
