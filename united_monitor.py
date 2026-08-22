@@ -615,44 +615,7 @@ def send_discord_summary_notification(detected_list, targets=None):
         return
 
     if not detected_list:
-        print("ℹ️ 条件に合う特典空席は見つかりませんでした。詳細稼働確認レポートをDiscordへ送信します。")
-        route_lines = []
-        if targets:
-            for t in targets:
-                airline_icon = "✈️ ユナイテッド" if t.get("airline") == "ユナイテッド" else ("🥑 ソラシド" if t.get("airline") == "ソラシド" else "🌐 すべて")
-                route_lines.append(f"• **{t['origin']} ➡️ {t['destination']}** [{airline_icon}] ({t['date_cond']}, {t.get('time_cond', '全時間帯')}) - {t.get('note', '')}")
-
-        routes_str = "\n".join(route_lines) if route_lines else "設定路線一覧"
-        desc = (
-            "全12ヶ月の自動スキャンが正常に完了いたしました。\n"
-            "現在、設定された監視条件に合う特典空席は **0 件** です。\n\n"
-            f"📋 **本回 スキャン実施路線一覧 (全 {len(targets) if targets else 0} 路線):**\n"
-            f"{routes_str}\n\n"
-            "システムは正常に稼働しており、引き続き1時間ごとに全自動監視を継続します。"
-        )
-
-        payload = {
-            "username": "統合特典航空券 監視システム",
-            "embeds": [{
-                "title": "🟢 【統合自動監視】定期スキャン完了報告",
-                "color": 3066993,
-                "description": desc,
-                "footer": {"text": "United ＆ ソラシドエア 統合特典航空券 全自動監視システム"},
-                "timestamp": datetime.utcnow().isoformat() + "Z"
-            }]
-        }
-        try:
-            payload_bytes = json.dumps(payload).encode('utf-8')
-            req = urllib.request.Request(
-                webhook_url,
-                data=payload_bytes,
-                headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
-            )
-            with urllib.request.urlopen(req, timeout=10) as res:
-                if res.status in [200, 204]:
-                    print("🎉 Discord稼働確認通知の送信に成功しました！")
-        except Exception as e:
-            print(f"⚠️ Discord通知送信エラー: {e}")
+        print("ℹ️ 条件に合う特典空席は見つかりませんでした。（空席0件のためDiscord通知は送信しません）")
         return
 
     cleaned_list = sorted(detected_list, key=lambda x: (x["airline"], x["date"]))
