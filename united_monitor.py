@@ -230,8 +230,6 @@ def get_sheet_targets():
             raw_str = service_account_json.strip()
             if raw_str.startswith('"') and raw_str.endswith('"'):
                 raw_str = raw_str[1:-1]
-            raw_str = raw_str.replace('\\\\n', '\n').replace('\\n', '\n')
-
             # 制御文字 (\x00-\x1f) の完全クリーニング
             raw_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', raw_str)
 
@@ -247,13 +245,6 @@ def get_sheet_targets():
             key_dict = json.loads(raw_str, strict=False)
             if "private_key" in key_dict and isinstance(key_dict["private_key"], str):
                 pk = key_dict["private_key"].replace('\\n', '\n')
-                header = "-----BEGIN PRIVATE KEY-----"
-                footer = "-----END PRIVATE KEY-----"
-                if header in pk and footer in pk:
-                    # ヘッダーとフッターの間を取り出し、改行やスペースを一切取り除いて標準PEM組み立て
-                    content = pk.split(header)[1].split(footer)[0].replace(" ", "").replace("\n", "").replace("\r", "").replace("\t", "")
-                    chunks = [content[i:i+64] for i in range(0, len(content), 64)]
-                    pk = f"{header}\n" + "\n".join(chunks) + f"\n{footer}\n"
                 key_dict["private_key"] = pk
 
             credentials = Credentials.from_service_account_info(key_dict, scopes=scopes)
