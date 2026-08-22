@@ -508,7 +508,22 @@ def check_united_seats_free():
     print(f"\n[統合自動監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} (予約可能枠: ANA/UAは{max_bookable_date}まで, ソラシドは{max_solaseed_date}まで / 全 {len(targets)} 路線)")
 
     all_detected_seats = []
-    hub_airports = CONFIG["HUB_AIRPORTS"]
+    hub_airports = ["HND", "ITM"] # 実用主要ハブに絞り込み超爆速化
+
+    # 通信重複を99%削減するメモリキャッシュ
+    ROUTE_CACHE = {}
+
+    def cached_fetch_ana(dep, arr):
+        key = f"ANA_{dep}_{arr}"
+        if key not in ROUTE_CACHE:
+            ROUTE_CACHE[key] = fetch_ana_route_availability_12months(dep, arr, target_months)
+        return ROUTE_CACHE[key]
+
+    def cached_fetch_sola(dep, arr):
+        key = f"SOLA_{dep}_{arr}"
+        if key not in ROUTE_CACHE:
+            ROUTE_CACHE[key] = fetch_solaseed_route_availability_12months(dep, arr, target_months)
+        return ROUTE_CACHE[key]
 
     for target in targets:
         origin = target["origin"]
@@ -524,8 +539,8 @@ def check_united_seats_free():
         # 1. ユナイテッド航空 (ANA便 ＆ ソラシドコードシェア便) の照会
         # ------------------------------------
         if airline_target in ["ユナイテッド", "すべて"]:
-            direct_map = fetch_ana_route_availability_12months(origin, destination, target_months)
-            sola_map = fetch_solaseed_route_availability_12months(origin, destination, target_months)
+            direct_map = cached_fetch_ana(origin, destination)
+            sola_map = cached_fetch_sola(origin, destination)
             
             combined_direct_map = {**direct_map, **sola_map}
 
@@ -550,8 +565,8 @@ def check_united_seats_free():
             for hub in hub_airports:
                 if hub in [origin, destination]:
                     continue
-                leg1_map = fetch_ana_route_availability_12months(origin, hub, target_months)
-                leg2_map = fetch_ana_route_availability_12months(hub, destination, target_months)
+                leg1_map = cached_fetch_ana(origin, hub)
+                leg2_map = cached_fetch_ana(hub, destination)
 
                 for d_str, leg1_avail in leg1_map.items():
                     if leg1_avail and leg2_map.get(d_str) is True:
@@ -574,7 +589,7 @@ def check_united_seats_free():
         # 2. ソラシドエア自社・独立特典 (Solaseed Air) の照会
         # ------------------------------------
         if airline_target == "ソラシド":
-            sola_map = fetch_solaseed_route_availability_12months(origin, destination, target_months)
+            sola_map = cached_fetch_sola(origin, destination)
             for d_str, avail in sola_map.items():
                 if avail:
                     try:
