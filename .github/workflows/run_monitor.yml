@@ -2,8 +2,9 @@ name: United Award Flight Monitor
 
 on:
   schedule:
-    - cron: '0 */2 * * *' # 無料枠内（1日12分・9日間で108分消費）で今すぐ自動監視運用を再開
-  workflow_dispatch: # 手動実行ボタンも有効
+    # 日本時間 朝 7:00 〜 夜 23:00 の間のみ1時間おきに全自動監視 (1日17分消費 / 残枠余裕あり)
+    - cron: '0 22,23,0-14 * * *'
+  workflow_dispatch:
 
 jobs:
   monitor:
