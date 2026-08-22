@@ -228,18 +228,19 @@ def get_sheet_targets():
                 raw_str = raw_str[1:-1]
             raw_str = raw_str.replace('\\\\n', '\n').replace('\\n', '\n')
 
-            # 制御文字 (\x00-\x08, \x0b, \x0c, \x0e-\x1f) の完全クリーニング
-            raw_str = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', raw_str)
+            # 制御文字 (\x00-\x1f) の完全クリーニング
+            raw_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', raw_str)
 
             if not raw_str.startswith("{"):
                 try:
                     decoded = base64.b64decode(raw_str).decode('utf-8')
                     if decoded.startswith("{"):
                         raw_str = decoded
+                        raw_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', raw_str)
                 except Exception:
                     pass
 
-            key_dict = json.loads(raw_str)
+            key_dict = json.loads(raw_str, strict=False)
             if "private_key" in key_dict and isinstance(key_dict["private_key"], str):
                 pk = key_dict["private_key"].replace('\\n', '\n')
                 header = "-----BEGIN PRIVATE KEY-----"
