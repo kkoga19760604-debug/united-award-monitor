@@ -5,9 +5,13 @@ import json
 import csv
 import io
 import time
+import socket
 import hashlib
 import urllib.request
 import urllib.parse
+
+# ソケット全通信の厳格ハードタイムアウト (3.0秒で強制切断しプロセスハングを完全防止)
+socket.setdefaulttimeout(3.0)
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
