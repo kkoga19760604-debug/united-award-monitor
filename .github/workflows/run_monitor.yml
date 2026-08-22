@@ -1,10 +1,9 @@
 name: United Award Flight Monitor
 
 on:
-  schedule:
-    # 9/1のリセットまでの安全対策：2時間おきに自動実行 (UTC時間)
-    - cron: '0 */2 * * *'
-  workflow_dispatch: # 手動実行ボタン有効化
+  # schedule:
+  #   - cron: '0 */2 * * *' # 9/1無料枠リセット後に再開予定
+  workflow_dispatch: # 手動実行ボタン有効化（無料枠消費0分で安全維持）
 
 jobs:
   monitor:
