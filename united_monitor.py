@@ -10,8 +10,12 @@ import hashlib
 import urllib.request
 import urllib.parse
 
-# ソケット全通信の厳格ハードタイムアウト (3.0秒で強制切断しプロセスハングを完全防止)
-socket.setdefaulttimeout(3.0)
+# Try importing curl_cffi for TLS impersonation to bypass 403 blocks
+try:
+    from curl_cffi import requests as requests_cffi
+except ImportError:
+    requests_cffi = None
+
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -353,7 +357,7 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
     availability_map = {}
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
         "Accept": "application/json, text/javascript, */*; q=0.01",
         "Referer": "https://www.ana.co.jp/"
     }
@@ -370,41 +374,52 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
         month_map = {}
         for url in urls:
             try:
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, context=ctx, timeout=5) as res:
-                    if res.status == 200:
-                        text = res.read().decode('utf-8', errors='ignore')
-                        try:
-                            data = json.loads(text)
-                            def traverse(o):
-                                if isinstance(o, list):
-                                    for item in o:
-                                        traverse(item)
-                                elif isinstance(o, dict):
-                                    d_val = o.get("date") or o.get("flightDate") or o.get("ymd")
-                                    s_val = o.get("status") or o.get("vacantStatus") or o.get("availability") or o.get("vacant")
-                                    if d_val and s_val:
-                                        d_str = str(d_val)
-                                        if len(d_str) == 8:
-                                            d_str = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:8]}"
-                                        s_str = str(s_val).upper().strip()
-                                        valid_keywords = ["OK", "LOW", "FEW", "○", "△", "AVAILABLE", "VACANT", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
-                                        neg_keywords = ["FULL", "NO", "×", "✕", "満席", "OUT", "0", "NONE"]
-                                        if any(kw in s_str for kw in valid_keywords) and not any(neg == s_str or neg in s_str for neg in neg_keywords):
-                                            month_map[d_str] = True
-                                    for k, v in o.items():
-                                        traverse(v)
-                            traverse(data)
-                            if month_map:
-                                break
-                        except Exception:
-                            pass
-            except Exception:
+                text = ""
+                if requests_cffi:
+                    r = requests_cffi.get(url, headers=headers, impersonate="chrome120", timeout=10)
+                    if r.status_code == 200:
+                        text = r.text
+                else:
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req, context=ctx, timeout=8) as res:
+                        if res.status == 200:
+                            text = res.read().decode('utf-8', errors='ignore')
+
+                if text and ("<html" not in text.lower()):
+                    try:
+                        data = json.loads(text)
+                        def traverse(o):
+                            if isinstance(o, list):
+                                for item in o:
+                                    traverse(item)
+                            elif isinstance(o, dict):
+                                d_val = o.get("date") or o.get("flightDate") or o.get("ymd")
+                                s_val = o.get("status") or o.get("vacantStatus") or o.get("availability") or o.get("vacant")
+                                if d_val and s_val:
+                                    d_str = str(d_val)
+                                    if len(d_str) == 8:
+                                        d_str = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:8]}"
+                                    s_str = str(s_val).upper().strip()
+                                    valid_keywords = ["OK", "LOW", "FEW", "○", "△", "AVAILABLE", "VACANT", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+                                    neg_keywords = ["FULL", "NO", "×", "✕", "満席", "OUT", "0", "NONE"]
+                                    if any(kw in s_str for kw in valid_keywords) and not any(neg == s_str or neg in s_str for neg in neg_keywords):
+                                        month_map[d_str] = True
+                                for k, v in o.items():
+                                    traverse(v)
+                        traverse(data)
+                        if month_map:
+                            break
+                    except Exception as e:
+                        print(f"⚠️ JSONパースエラー ({dep}->{arr} {ym_str}): {e}")
+                elif text:
+                    print(f"⚠️ 照会レスポンス異常(旧HTMLページ) ({dep}->{arr} {ym_str})")
+            except Exception as e:
+                print(f"⚠️ 通信エラー ({dep}->{arr} {ym_str}): {e}")
                 continue
 
         return month_map
 
-    with ThreadPoolExecutor(max_workers=12) as executor:
+    with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {executor.submit(fetch_month, ym): ym for ym in target_months}
         for future in as_completed(futures):
             res_map = future.result()
@@ -421,7 +436,7 @@ def fetch_solaseed_route_availability_12months(dep, arr, target_months):
     """
     availability_map = {}
     headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
         "Accept": "application/json, text/javascript, */*",
         "Referer": "https://www.ana.co.jp/"
     }
@@ -439,41 +454,52 @@ def fetch_solaseed_route_availability_12months(dep, arr, target_months):
         month_map = {}
         for url in urls:
             try:
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, context=ctx, timeout=5) as res:
-                    if res.status == 200:
-                        text = res.read().decode('utf-8', errors='ignore')
-                        try:
-                            data = json.loads(text)
-                            def traverse(o):
-                                if isinstance(o, list):
-                                    for item in o:
-                                        traverse(item)
-                                elif isinstance(o, dict):
-                                    d_val = o.get("date") or o.get("flightDate") or o.get("ymd")
-                                    s_val = o.get("status") or o.get("vacantStatus") or o.get("availability") or o.get("vacant")
-                                    if d_val and s_val:
-                                        d_str = str(d_val)
-                                        if len(d_str) == 8:
-                                            d_str = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:8]}"
-                                        s_str = str(s_val).upper().strip()
-                                        valid_keywords = ["OK", "LOW", "FEW", "○", "△", "AVAILABLE", "VACANT", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
-                                        neg_keywords = ["FULL", "NO", "×", "✕", "満席", "OUT", "0", "NONE"]
-                                        if any(kw in s_str for kw in valid_keywords) and not any(neg == s_str or neg in s_str for neg in neg_keywords):
-                                            month_map[d_str] = True
-                                    for k, v in o.items():
-                                        traverse(v)
-                            traverse(data)
-                            if month_map:
-                                break
-                        except Exception:
-                            pass
-            except Exception:
+                text = ""
+                if requests_cffi:
+                    r = requests_cffi.get(url, headers=headers, impersonate="chrome120", timeout=10)
+                    if r.status_code == 200:
+                        text = r.text
+                else:
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req, context=ctx, timeout=8) as res:
+                        if res.status == 200:
+                            text = res.read().decode('utf-8', errors='ignore')
+
+                if text and ("<html" not in text.lower()):
+                    try:
+                        data = json.loads(text)
+                        def traverse(o):
+                            if isinstance(o, list):
+                                for item in o:
+                                    traverse(item)
+                            elif isinstance(o, dict):
+                                d_val = o.get("date") or o.get("flightDate") or o.get("ymd")
+                                s_val = o.get("status") or o.get("vacantStatus") or o.get("availability") or o.get("vacant")
+                                if d_val and s_val:
+                                    d_str = str(d_val)
+                                    if len(d_str) == 8:
+                                        d_str = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:8]}"
+                                    s_str = str(s_val).upper().strip()
+                                    valid_keywords = ["OK", "LOW", "FEW", "○", "△", "AVAILABLE", "VACANT", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+                                    neg_keywords = ["FULL", "NO", "×", "✕", "満席", "OUT", "0", "NONE"]
+                                    if any(kw in s_str for kw in valid_keywords) and not any(neg == s_str or neg in s_str for neg in neg_keywords):
+                                        month_map[d_str] = True
+                                for k, v in o.items():
+                                    traverse(v)
+                        traverse(data)
+                        if month_map:
+                            break
+                    except Exception as e:
+                        print(f"⚠️ JSONパースエラー ({dep}->{arr} {ym_str}): {e}")
+                elif text:
+                    print(f"⚠️ 照会レスポンス異常(旧HTMLページ) ({dep}->{arr} {ym_str})")
+            except Exception as e:
+                print(f"⚠️ 通信エラー ({dep}->{arr} {ym_str}): {e}")
                 continue
 
         return month_map
 
-    with ThreadPoolExecutor(max_workers=12) as executor:
+    with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {executor.submit(fetch_month, ym): ym for ym in target_months}
         for future in as_completed(futures):
             res_map = future.result()
