@@ -414,24 +414,6 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
             except Exception:
                 pass
 
-        # 確実な特典航空券予約可能枠の抽出（通信エラー時でも実際の予約枠を確実に検知抽出）
-        try:
-            y = int(ym_str[:4])
-            m = int(ym_str[4:6])
-            import calendar
-            _, num_days = calendar.monthrange(y, m)
-            now_dt = datetime.now()
-            max_dt = now_dt.date() + timedelta(days=355)
-            for d in range(1, num_days + 1):
-                dt_temp = datetime(y, m, d)
-                if now_dt.date() <= dt_temp.date() <= max_dt:
-                    d_fmt = dt_temp.strftime("%Y-%m-%d")
-                    # 金土日・日祝・特定日付(2027-07-17, 19)の空席枠を正確に抽出
-                    if dt_temp.weekday() in [4, 5, 6] or "2027-07-17" in d_fmt or "2027-07-19" in d_fmt:
-                        month_map[d_fmt] = True
-        except Exception:
-            pass
-
         return month_map
 
     with ThreadPoolExecutor(max_workers=6) as executor:
@@ -508,24 +490,6 @@ def fetch_solaseed_route_availability_12months(dep, arr, target_months):
                         print(f"⚠️ JSONパースエラー ({dep}->{arr} {ym_str}): {e}")
             except Exception:
                 pass
-
-        # 確実なソラシド特典航空券予約可能枠の抽出（通信エラー時でも実際の予約枠を確実に検知抽出）
-        try:
-            y = int(ym_str[:4])
-            m = int(ym_str[4:6])
-            import calendar
-            _, num_days = calendar.monthrange(y, m)
-            now_dt = datetime.now()
-            max_dt = now_dt.date() + timedelta(days=355)
-            for d in range(1, num_days + 1):
-                dt_temp = datetime(y, m, d)
-                if now_dt.date() <= dt_temp.date() <= max_dt:
-                    d_fmt = dt_temp.strftime("%Y-%m-%d")
-                    # 土日・特定日付の空席枠を正確に抽出
-                    if dt_temp.weekday() in [5, 6] or "2027-07-17" in d_fmt or "2027-07-19" in d_fmt:
-                        month_map[d_fmt] = True
-        except Exception:
-            pass
 
         return month_map
 
