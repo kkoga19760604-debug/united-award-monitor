@@ -673,13 +673,17 @@ def send_discord_summary_notification(detected_list, targets=None):
             }]
         }
         try:
+            import ssl
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
             payload_bytes = json.dumps(payload).encode('utf-8')
             req = urllib.request.Request(
                 webhook_url,
                 data=payload_bytes,
                 headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
             )
-            with urllib.request.urlopen(req, timeout=10) as res:
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as res:
                 if res.status in [200, 204]:
                     print("🎉 最新空席調査結果レポートのDiscord送信に成功しました！")
         except Exception as e:
@@ -770,13 +774,17 @@ def send_discord_summary_notification(detected_list, targets=None):
             payload["content"] = mention
 
         try:
+            import ssl
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
             payload_bytes = json.dumps(payload).encode('utf-8')
             req = urllib.request.Request(
                 webhook_url,
                 data=payload_bytes,
                 headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
             )
-            with urllib.request.urlopen(req, timeout=10) as res:
+            with urllib.request.urlopen(req, context=ctx, timeout=10) as res:
                 if res.status in [200, 204]:
                     print(f"🎉 Discord全件一括通知送信成功 (パート {i//CHUNK_SIZE + 1} / {(len(embeds)+CHUNK_SIZE-1)//CHUNK_SIZE})")
                 else:
