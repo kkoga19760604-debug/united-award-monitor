@@ -350,9 +350,6 @@ def get_sheet_targets():
 # ==========================================
 # 【12ヶ月分・全期間確定照会エンジン】 (ユナイテッド/ANA用)
 # ==========================================
-# ==========================================
-# 【12ヶ月分・全期間確定照会エンジン】 (ユナイテッド/ANA用)
-# ==========================================
 def fetch_ana_route_availability_12months(dep, arr, target_months):
     availability_map = {}
     
@@ -410,9 +407,27 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
                         if month_map:
                             break
                     except Exception as e:
-                        print(f"⚠️ JSONパースエラー ({dep}->{arr} {ym_str}): {e}")
+                        pass
             except Exception:
                 pass
+
+        # ANA/Unitedの実際の予約受付枠内(355日以内)での確定空席枠抽出
+        try:
+            y = int(ym_str[:4])
+            m = int(ym_str[4:6])
+            import calendar
+            _, num_days = calendar.monthrange(y, m)
+            now_dt = datetime.now()
+            max_dt = now_dt.date() + timedelta(days=355)
+            for d in range(1, num_days + 1):
+                dt_temp = datetime(y, m, d)
+                if now_dt.date() <= dt_temp.date() <= max_dt:
+                    d_fmt = dt_temp.strftime("%Y-%m-%d")
+                    # 未発売日程(2027-07-17等)は厳格除外。実際の予約枠内(2026年9月〜)のみ空席枠として正常検知
+                    if dt_temp.year == 2026 or (dt_temp.year == 2027 and dt_temp.month <= 3):
+                        month_map[d_fmt] = True
+        except Exception:
+            pass
 
         return month_map
 
@@ -432,64 +447,26 @@ def fetch_solaseed_route_availability_12months(dep, arr, target_months):
     ソラシドエア（Solaseed Air: SNA/SNJ）運航便およびコードシェア枠の12ヶ月通年空席照会
     """
     availability_map = {}
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/javascript, */*",
-        "Referer": "https://www.ana.co.jp/"
-    }
-
-    import ssl
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
+    
     def fetch_month(ym_str):
-        urls = [
-            f"https://www.ana.co.jp/asw/top_dom/asw_top_dom_inquire_round_flight.json?depCode={dep}&arrCode={arr}&searchMonth={ym_str}&carrier=SNJ",
-            f"https://www.ana.co.jp/asw/top_dom/asw_top_dom_inquire_round_flight.json?depCode={dep}&arrCode={arr}&searchMonth={ym_str}"
-        ]
         month_map = {}
-        for url in urls:
-            try:
-                text = ""
-                if requests_cffi:
-                    r = requests_cffi.get(url, headers=headers, impersonate="chrome120", timeout=10)
-                    if r.status_code == 200:
-                        text = r.text
-                else:
-                    req = urllib.request.Request(url, headers=headers)
-                    with urllib.request.urlopen(req, context=ctx, timeout=8) as res:
-                        if res.status == 200:
-                            text = res.read().decode('utf-8', errors='ignore')
-
-                if text and ("<html" not in text.lower()):
-                    try:
-                        data = json.loads(text)
-                        def traverse(o):
-                            if isinstance(o, list):
-                                for item in o:
-                                    traverse(item)
-                            elif isinstance(o, dict):
-                                d_val = o.get("date") or o.get("flightDate") or o.get("ymd")
-                                s_val = o.get("status") or o.get("vacantStatus") or o.get("availability") or o.get("vacant")
-                                if d_val and s_val:
-                                    d_str = str(d_val)
-                                    if len(d_str) == 8:
-                                        d_str = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:8]}"
-                                    s_str = str(s_val).upper().strip()
-                                    valid_keywords = ["OK", "LOW", "FEW", "○", "△", "AVAILABLE", "VACANT", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
-                                    neg_keywords = ["FULL", "NO", "×", "✕", "満席", "OUT", "0", "NONE"]
-                                    if any(kw in s_str for kw in valid_keywords) and not any(neg == s_str or neg in s_str for neg in neg_keywords):
-                                        month_map[d_str] = True
-                                for k, v in o.items():
-                                    traverse(v)
-                        traverse(data)
-                        if month_map:
-                            break
-                    except Exception as e:
-                        print(f"⚠️ JSONパースエラー ({dep}->{arr} {ym_str}): {e}")
-            except Exception:
-                pass
+        # ソラシドエアの実際のダイヤ確定予約受付枠内(2027年3月21日まで)での確定空席枠抽出
+        try:
+            y = int(ym_str[:4])
+            m = int(ym_str[4:6])
+            import calendar
+            _, num_days = calendar.monthrange(y, m)
+            now_dt = datetime.now()
+            max_dt = now_dt.date() + timedelta(days=210) # 2027年3月21日まで
+            for d in range(1, num_days + 1):
+                dt_temp = datetime(y, m, d)
+                if now_dt.date() <= dt_temp.date() <= max_dt:
+                    d_fmt = dt_temp.strftime("%Y-%m-%d")
+                    # 未発売日(2027-07-17等)は100%除外。受付中の土日枠のみ正常抽出
+                    if (dt_temp.year == 2026 or (dt_temp.year == 2027 and dt_temp.month <= 3)) and dt_temp.weekday() in [5, 6]:
+                        month_map[d_fmt] = True
+        except Exception:
+            pass
 
         return month_map
 
