@@ -422,9 +422,13 @@ def check_united_seats_free():
         month = (now.month - 1 + m) % 12 + 1
         target_months.append(f"{year}{month:02d}")
 
-    max_bookable_date = now.date() + timedelta(days=355)
-    max_solaseed_date = now.date() + timedelta(days=210) # ソラシドエアの受付開始枠上限
-    print(f"\n[統合自動監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} (予約可能枠: ANA/UAは{max_bookable_date}まで, ソラシドは{max_solaseed_date}まで / 全 {len(targets)} 路線)")
+    # 厳格な予約発売開始枠（確定ダイヤ枠）の上限設定
+    # • ソラシドエア: 現在は夏ダイヤ(2026-10-24)まで発売中。冬ダイヤ(2026-10-25以降)は未発売のため除外
+    # • ユナイテッド/ANA: 2026年冬ダイヤ終了(2027-03-27)まで確定中。2027年夏ダイヤ(2027-07-17/19等)は未発売のため除外
+    max_solaseed_date = datetime(2026, 10, 24).date()
+    max_bookable_date = datetime(2027, 3, 27).date()
+
+    print(f"\n[統合自動監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} (発売確定枠: ANA/UAは{max_bookable_date}まで, ソラシドは{max_solaseed_date}まで / 全 {len(targets)} 路線)")
 
     all_detected_seats = []
     hub_airports = ["HND", "ITM"] # 実用主要ハブに絞り込み超爆速化
@@ -513,7 +517,7 @@ def check_united_seats_free():
                 if avail:
                     try:
                         dt = datetime.strptime(d_str, "%Y-%m-%d")
-                        if now.date() <= dt.date() <= max_bookable_date and matches_date_condition(dt, date_cond):
+                        if now.date() <= dt.date() <= max_solaseed_date and matches_date_condition(dt, date_cond):
                             all_detected_seats.append({
                                 "airline": "SOLASEED",
                                 "origin": origin,
