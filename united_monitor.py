@@ -411,25 +411,20 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
             except Exception:
                 pass
 
-        # ANA/Unitedの実際の予約受付枠内(355日以内)での確定空席枠抽出
-        try:
-            y = int(ym_str[:4])
-            m = int(ym_str[4:6])
-            import calendar
-            _, num_days = calendar.monthrange(y, m)
-            now_dt = datetime.now()
-            max_dt = now_dt.date() + timedelta(days=355)
-            for d in range(1, num_days + 1):
-                dt_temp = datetime(y, m, d)
-                if now_dt.date() <= dt_temp.date() <= max_dt:
-                    d_fmt = dt_temp.strftime("%Y-%m-%d")
-                    # 未発売日程(2027-07-17等)は厳格除外。実際の予約枠内(2026年9月〜)のみ空席枠として正常検知
-                    if dt_temp.year == 2026 or (dt_temp.year == 2027 and dt_temp.month <= 3):
-                        month_map[d_fmt] = True
-        except Exception:
-            pass
+        # 実APIで検知された空席枠（now_dt 〜 355日以内）のみを返却
+        now_dt = datetime.now().date()
+        max_dt = now_dt + timedelta(days=355)
+        filtered_map = {}
+        for d_str, avail in month_map.items():
+            if avail:
+                try:
+                    dt = datetime.strptime(d_str, "%Y-%m-%d").date()
+                    if now_dt <= dt <= max_dt:
+                        filtered_map[d_str] = True
+                except Exception:
+                    pass
 
-        return month_map
+        return filtered_map
 
     with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {executor.submit(fetch_month, ym): ym for ym in target_months}
@@ -445,38 +440,9 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
 def fetch_solaseed_route_availability_12months(dep, arr, target_months):
     """
     ソラシドエア（Solaseed Air: SNA/SNJ）運航便およびコードシェア枠の12ヶ月通年空席照会
+    （ダミー付与を全撤去し、実通信で取得したリアル空席のみを返却）
     """
-    availability_map = {}
-    
-    def fetch_month(ym_str):
-        month_map = {}
-        # ソラシドエアの実際のダイヤ確定予約受付枠内(2027年3月21日まで)での確定空席枠抽出
-        try:
-            y = int(ym_str[:4])
-            m = int(ym_str[4:6])
-            import calendar
-            _, num_days = calendar.monthrange(y, m)
-            now_dt = datetime.now()
-            max_dt = now_dt.date() + timedelta(days=210) # 2027年3月21日まで
-            for d in range(1, num_days + 1):
-                dt_temp = datetime(y, m, d)
-                if now_dt.date() <= dt_temp.date() <= max_dt:
-                    d_fmt = dt_temp.strftime("%Y-%m-%d")
-                    # 未発売日(2027-07-17等)は100%除外。受付中の土日枠のみ正常抽出
-                    if (dt_temp.year == 2026 or (dt_temp.year == 2027 and dt_temp.month <= 3)) and dt_temp.weekday() in [5, 6]:
-                        month_map[d_fmt] = True
-        except Exception:
-            pass
-
-        return month_map
-
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        futures = {executor.submit(fetch_month, ym): ym for ym in target_months}
-        for future in as_completed(futures):
-            res_map = future.result()
-            availability_map.update(res_map)
-
-    return availability_map
+    return fetch_ana_route_availability_12months(dep, arr, target_months)
 
 # ==========================================
 # メイン実行関数 (ユナイテッド ＋ ソラシド 統合版)
