@@ -325,9 +325,9 @@ def get_sheet_targets():
         except Exception as e:
             print(f"⚠️ スプレッドシートのパースエラー: {e}")
 
-    # フォールバック処理: スプレッドシート非公開時の標準プルダウン定義 (ユーザー様の実データ10行完全再現)
+    # フォールバック処理: スプレッドシート取得失敗時の予備定義 (「有効」設定の路線のみ)
     if not targets:
-        print("ℹ️ スプレッドシートの標準プルダウン構成を使用します。")
+        print("⚠️ スプレッドシートのリアルタイム取得に失敗したため、ユーザー様の「有効」設定路線のみを使用します。")
         targets = [
             {"row": 2, "origin": "KMJ", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "熊本→仙台"},
             {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "仙台→熊本"},
@@ -336,9 +336,8 @@ def get_sheet_targets():
             {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "熊本→那覇"},
             {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "那覇→熊本"},
             {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "福岡→那覇"},
-            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "那覇→福岡"},
-            {"row": 10, "origin": "KMJ", "destination": "HND", "date_cond": "土日", "cabin": "エコノミー", "airline": "ソラシド", "time_cond": "午前便", "note": "熊本→東京"},
-            {"row": 11, "origin": "HND", "destination": "KMJ", "date_cond": "土日", "cabin": "エコノミー", "airline": "ソラシド", "time_cond": "夕方以降", "note": "東京→熊本"}
+            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "那覇→福岡"}
+            # ★注意: スプレッドシートで「停止」に設定されたソラシド2路線(KMJ↔HND)は完全除外
         ]
 
     print(f"✅ 対象監視ルート全 {len(targets)} 件を読み込みました。")
@@ -361,7 +360,9 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
 
     def fetch_month(ym_str):
         urls = [
-            f"https://www.ana.co.jp/asw/top_dom/asw_top_dom_inquire_round_flight.json?depCode={dep}&arrCode={arr}&searchMonth={ym_str}"
+            f"https://www.ana.co.jp/asw/top_dom/inquireFlight.json?depCode={dep}&arrCode={arr}&searchMonth={ym_str}",
+            f"https://www.ana.co.jp/asw/booking/map/searchFareCalendar.json?depCode={dep}&arrCode={arr}&searchMonth={ym_str}",
+            f"https://www.ana.co.jp/asw/calendar/dom/fareCalendar.json?depCode={dep}&arrCode={arr}&searchMonth={ym_str}"
         ]
         month_map = {}
         for url in urls:
@@ -376,7 +377,7 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
                     if r.status_code == 200:
                         text = r.text
 
-                if text and ("<html" not in text.lower()):
+                if text and ("<html" not in text.lower()) and ("指定されたページが見つかりません" not in text):
                     try:
                         data = json.loads(text)
                         def traverse(o):
@@ -587,23 +588,40 @@ def send_discord_summary_notification(detected_list, targets=None):
         return
 
     if not detected_list:
-        print("📊 条件に合う特典空席は0件でした。全10路線の最新調査結果レポートをDiscordへ送信します。")
+        target_count = len(targets) if targets else 0
+        print(f"📊 条件に合う特典空席は0件でした。全 {target_count} 路線の最新調査結果レポートをDiscordへ送信します。")
         route_lines = []
         if targets:
+            max_solaseed_date = datetime(2026, 10, 24).date()
+            max_bookable_date = datetime(2027, 3, 27).date()
             for t in targets:
                 airline_icon = "✈️ ユナイテッド" if t.get("airline") == "ユナイテッド" else ("🥑 ソラシド" if t.get("airline") == "ソラシド" else "🌐 すべて")
                 time_info = f" ({t.get('time_cond', '全時間帯')})" if t.get('time_cond') else ""
+                
+                # 指定日付が未発売枠かどうかの判定
+                date_cond = t.get('date_cond', '')
+                is_unreleased = False
+                if re.match(r'^\d{4}-\d{2}-\d{2}$', date_cond):
+                    try:
+                        spec_dt = datetime.strptime(date_cond, "%Y-%m-%d").date()
+                        limit = max_solaseed_date if t.get("airline") == "ソラシド" else max_bookable_date
+                        if spec_dt > limit:
+                            is_unreleased = True
+                    except Exception:
+                        pass
+                
+                result_str = "未発売枠 (予約開始前)" if is_unreleased else "空席 0 件"
                 route_lines.append(
                     f"• **{t['origin']} ➡️ {t['destination']}** [{airline_icon}]\n"
-                    f"  └ 条件: `{t['date_cond']}`{time_info} / 結果: **空席 0 件**"
+                    f"  └ 条件: `{t['date_cond']}`{time_info} / 結果: **{result_str}**"
                 )
 
         routes_str = "\n".join(route_lines) if route_lines else "設定路線一覧"
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
         desc = (
-            f"🔍 **スプレッドシート定義全 {len(targets) if targets else 0} 路線の最新空席調査結果 ({now_str})**\n\n"
-            "今月から12ヶ月先（最大355日先まで）の全全便・経由便を完全照会調査いたしました。\n"
-            "現時点でご指定の条件に一致する空席は **0 件** です。\n\n"
+            f"🔍 **スプレッドシート定義全 {target_count} 路線の最新空席調査結果 ({now_str})**\n\n"
+            "今月から12ヶ月先（予約確定枠上限まで）の全便・経由便を照会調査いたしました。\n"
+            "現時点でご指定の発売中条件に一致する空席は **0 件** です。\n\n"
             "📋 **【各路線の最新調査結果一覧】**\n"
             f"{routes_str}\n\n"
             "※新しい空席枠が解放され次第、本チャットに即時レポートが届きます。"
@@ -612,7 +630,7 @@ def send_discord_summary_notification(detected_list, targets=None):
         payload = {
             "username": "統合特典航空券 監視システム",
             "embeds": [{
-                "title": "📊 【特典航空券】全10路線 最新空席調査結果レポート",
+                "title": f"📊 【特典航空券】全 {target_count} 路線 最新空席調査結果レポート",
                 "color": 3447003, # ネイビーブルー
                 "description": desc,
                 "footer": {"text": "United ＆ ソラシドエア 統合特典航空券 全自動高速監視システム"},
