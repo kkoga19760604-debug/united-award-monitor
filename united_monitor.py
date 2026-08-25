@@ -448,12 +448,12 @@ def check_united_seats_free():
         target_months.append(f"{year}{month:02d}")
 
     # 厳格な予約発売開始枠（確定ダイヤ枠）の上限設定
-    # • ソラシドエア: 現在は夏ダイヤ(2026-10-24)まで発売中。冬ダイヤ(2026-10-25以降)は未発売のため除外
-    # • ユナイテッド/ANA: 2026年冬ダイヤ終了(2027-03-27)まで確定中。2027年夏ダイヤ(2027-07-17/19等)は未発売のため除外
+    # • ソラシドエア: 現在は夏ダイヤ(2026-10-24)まで発売中。
+    # • ユナイテッド/ANA (MileagePlus特典航空券): 本日から337日先（2027年7月下旬まで）が予約可能
     max_solaseed_date = datetime(2026, 10, 24).date()
-    max_bookable_date = datetime(2027, 3, 27).date()
+    max_bookable_date = now.date() + timedelta(days=337)
 
-    print(f"\n[統合自動監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} (発売確定枠: ANA/UAは{max_bookable_date}まで, ソラシドは{max_solaseed_date}まで / 全 {len(targets)} 路線)")
+    print(f"\n[統合自動監視開始] 対象期間: {target_months[0]} 〜 {target_months[-1]} (発売確定枠: UA/ANAは337日先[{max_bookable_date}]まで, ソラシドは{max_solaseed_date}まで / 全 {len(targets)} 路線)")
 
     all_detected_seats = []
     hub_airports = ["HND", "ITM"] # 実用主要ハブに絞り込み超爆速化
@@ -593,7 +593,7 @@ def send_discord_summary_notification(detected_list, targets=None):
         route_lines = []
         if targets:
             max_solaseed_date = datetime(2026, 10, 24).date()
-            max_bookable_date = datetime(2027, 3, 27).date()
+            max_bookable_date = datetime.now().date() + timedelta(days=337)
             for t in targets:
                 airline_icon = "✈️ ユナイテッド" if t.get("airline") == "ユナイテッド" else ("🥑 ソラシド" if t.get("airline") == "ソラシド" else "🌐 すべて")
                 time_info = f" ({t.get('time_cond', '全時間帯')})" if t.get('time_cond') else ""
