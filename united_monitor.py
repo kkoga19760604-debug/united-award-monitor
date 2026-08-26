@@ -434,6 +434,9 @@ def fetch_ana_route_availability_12months(dep, arr, target_months):
                             break
                     except Exception:
                         pass
+                elif text and "<html" in text.lower():
+                    # Akamai / HTMLブロック検知
+                    print(f"⚠️ Akamai / HTMLブロック検知 (URL: {url[:50]}...)")
             except Exception:
                 pass
 
