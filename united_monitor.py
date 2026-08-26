@@ -325,10 +325,11 @@ def get_sheet_targets():
         except Exception as e:
             print(f"⚠️ スプレッドシートのパースエラー: {e}")
 
-    # フォールバック処理: スプレッドシート取得失敗時の予備定義 (スプレッドシートで現在「有効」設定の沖縄4路線のみ)
+    # フォールバック処理: スプレッドシート取得失敗時の予備定義 (スプレッドシートで現在「有効」設定の5路線)
     if not targets:
-        print("⚠️ スプレッドシートのリアルタイム取得に失敗したため、ユーザー様の「有効」設定路線（沖縄4路線）のみを使用します。")
+        print("⚠️ スプレッドシートのリアルタイム取得に失敗したため、ユーザー様の「有効」設定路線（5路線）のみを使用します。")
         targets = [
+            {"row": 2, "origin": "KMJ", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "熊本→仙台"},
             {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "熊本→沖縄"},
             {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "沖縄→熊本"},
             {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "福岡→沖縄"},
