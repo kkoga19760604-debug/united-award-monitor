@@ -289,6 +289,41 @@ def get_sheet_targets():
             except Exception:
                 continue
 
+    # ★ 優先度3: htmlview / pubhtml からのHTMLテーブル自動スクレイピング (公開CSVがブロックされた場合の自動パース)
+    if not rows:
+        html_urls = [
+            f"https://docs.google.com/spreadsheets/d/{sheet_id}/htmlview",
+            f"https://docs.google.com/spreadsheets/d/{sheet_id}/pubhtml",
+            f"https://docs.google.com/spreadsheets/d/{sheet_id}/pub?output=html"
+        ]
+        for url in html_urls:
+            try:
+                req = urllib.request.Request(
+                    url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                    }
+                )
+                with urllib.request.urlopen(req, timeout=10) as res:
+                    if res.status == 200:
+                        html_text = res.read().decode('utf-8', errors='ignore')
+                        tr_matches = re.findall(r'<tr[^>]*>(.*?)</tr>', html_text, re.DOTALL | re.IGNORECASE)
+                        if tr_matches:
+                            extracted_rows = []
+                            for tr in tr_matches:
+                                td_matches = re.findall(r'<td[^>]*>(.*?)</td>', tr, re.DOTALL | re.IGNORECASE)
+                                if td_matches:
+                                    clean_row = [re.sub(r'<[^>]+>', '', td).strip() for td in td_matches]
+                                    if any(clean_row):
+                                        extracted_rows.append(clean_row)
+                            if len(extracted_rows) > 1:
+                                rows = extracted_rows
+                                print(f"✅ HTML構造解析経由でスプレッドシートリアルタイム取得成功！ (全 {len(rows)} 行)")
+                                break
+            except Exception:
+                continue
+
     targets = []
     if rows:
         try:
