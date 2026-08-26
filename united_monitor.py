@@ -325,19 +325,14 @@ def get_sheet_targets():
         except Exception as e:
             print(f"⚠️ スプレッドシートのパースエラー: {e}")
 
-    # フォールバック処理: スプレッドシート取得失敗時の予備定義 (「有効」設定の路線のみ)
+    # フォールバック処理: スプレッドシート取得失敗時の予備定義 (スプレッドシートで現在「有効」設定の沖縄4路線のみ)
     if not targets:
-        print("⚠️ スプレッドシートのリアルタイム取得に失敗したため、ユーザー様の「有効」設定路線のみを使用します。")
+        print("⚠️ スプレッドシートのリアルタイム取得に失敗したため、ユーザー様の「有効」設定路線（沖縄4路線）のみを使用します。")
         targets = [
-            {"row": 2, "origin": "KMJ", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "熊本→仙台"},
-            {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "仙台→熊本"},
-            {"row": 4, "origin": "FUK", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "福岡→仙台"},
-            {"row": 5, "origin": "SDJ", "destination": "FUK", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "仙台→福岡"},
-            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "熊本→那覇"},
-            {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "那覇→熊本"},
-            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "福岡→那覇"},
-            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "那覇→福岡"}
-            # ★注意: スプレッドシートで「停止」に設定されたソラシド2路線(KMJ↔HND)は完全除外
+            {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "熊本→沖縄"},
+            {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "沖縄→熊本"},
+            {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "福岡→沖縄"},
+            {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "沖縄→福岡"}
         ]
 
     print(f"✅ 対象監視ルート全 {len(targets)} 件を読み込みました。")

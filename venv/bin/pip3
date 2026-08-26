@@ -1,4 +1,4 @@
-#!/Users/katsupapa_1/.gemini/antigravity/scratch/united_award_monitor/venv/bin/python3
+#!/Users/katsupapa_1/.gemini/antigravity/scratch/united-award-monitor/venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys

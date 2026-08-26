@@ -29,7 +29,7 @@ end
 # Unset irrelevant variables.
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV "/Users/katsupapa_1/.gemini/antigravity/scratch/united_award_monitor/venv"
+set -gx VIRTUAL_ENV "/Users/katsupapa_1/.gemini/antigravity/scratch/united-award-monitor/venv"
 
 set -gx _OLD_VIRTUAL_PATH $PATH
 set -gx PATH "$VIRTUAL_ENV/bin" $PATH
