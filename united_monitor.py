@@ -641,7 +641,7 @@ def send_discord_summary_notification(detected_list, targets=None):
                     except Exception:
                         pass
                 
-                result_str = "未発売枠 (予約開始前)" if is_unreleased else "空席 0 件"
+                result_str = "未発売枠 (予約開始前)" if is_unreleased else ("照会エラー (API応答なし)" if not t.get("api_success", True) else "空席 0 件")
                 route_lines.append(
                     f"• **{t['origin']} ➡️ {t['destination']}** [{airline_icon}]\n"
                     f"  └ 条件: `{t['date_cond']}`{time_info} / 結果: **{result_str}**"
