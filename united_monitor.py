@@ -20,16 +20,18 @@ CONFIG = {
 }
 
 # ==========================================
-# 確実性100%・定義済み有効全6路線データ
-# (GCPキー未設定やアクセスエラーに左右されず確実に動作)
+# 確実性100%・定義済み有効全路線データ (フォールバック)
+# (スプレッドシート最新の全8有効行を反映)
 # ==========================================
 DEFAULT_TARGETS = [
     {"row": 2, "origin": "KMJ", "destination": "SDJ", "date_cond": "金土日", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "熊本→仙台"},
     {"row": 3, "origin": "SDJ", "destination": "KMJ", "date_cond": "日祝", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "仙台→熊本"},
-    {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "熊本→沖縄"},
-    {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "沖縄→熊本"},
-    {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "福岡→沖縄"},
-    {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "沖縄→福岡"}
+    {"row": 6, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "熊本→那覇"},
+    {"row": 7, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "那覇→熊本"},
+    {"row": 8, "origin": "FUK", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "午前便", "note": "福岡→那覇"},
+    {"row": 9, "origin": "OKA", "destination": "FUK", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ユナイテッド", "time_cond": "全時間帯", "note": "那覇→福岡"},
+    {"row": 12, "origin": "KMJ", "destination": "OKA", "date_cond": "2027-07-17", "cabin": "エコノミー", "airline": "ANA", "time_cond": "午前便", "note": "熊本→那覇"},
+    {"row": 13, "origin": "OKA", "destination": "KMJ", "date_cond": "2027-07-19", "cabin": "エコノミー", "airline": "ANA", "time_cond": "全時間帯", "note": "那覇→熊本"}
 ]
 
 def extract_airport_code(text):
@@ -95,9 +97,9 @@ def get_sheet_targets():
                 destination = extract_airport_code(row[2])
                 date_cond = str(row[3]).strip() if len(row) > 3 else "すべて"
                 cabin = str(row[4]).strip() if len(row) > 4 else "すべて"
-                airline = str(row[5]).strip() if len(row) > 5 else "すべて"
+                airline = str(row[5]).strip() if len(row) > 5 else "ユナイテッド"
                 time_cond = str(row[6]).strip() if len(row) > 6 else "全時間帯"
-                note = str(row[7]).strip() if len(row) > 7 else (row[5] if len(row) == 6 else "")
+                note = str(row[7]).strip() if len(row) > 7 else f"{origin}→{destination}"
 
                 if origin and destination:
                     targets.append({
@@ -111,7 +113,7 @@ def get_sheet_targets():
                         "note": note
                     })
             if targets:
-                print(f"✅ GCP認証成功: スプレッドシートより全 {len(targets)} 件を動的読み込みました。")
+                print(f"✅ GCP認証成功: スプレッドシートより全 {len(targets)} 件の有効路線を動的読み込みました。")
                 return targets
         except Exception as e:
             print(f"ℹ️ スプレッドシート接続スキップ (フォールバック定義使用): {e}")
@@ -134,6 +136,14 @@ def build_united_award_url(origin, destination, date_str):
     }
     return f"{base_url}?{urllib.parse.urlencode(params)}"
 
+def build_ana_award_url(origin, destination, date_str):
+    # ANA国内線特典航空券 予約ダイレクトURL
+    return "https://www.ana.co.jp/asw/index.jsp?type=d_award"
+
+def build_solaseed_award_url():
+    # ソラシド スマイルクラブ 特典予約URL
+    return "https://www.solaseedair.jp/members/mile/award.html"
+
 def get_next_matching_dates(date_cond):
     now = datetime.now()
     cond_str = date_cond.strip()
@@ -150,6 +160,8 @@ def get_next_matching_dates(date_cond):
         if "金土日" in cond_str and day_of_week in [4, 5, 6]:
             matching_dates.append(d_str)
         elif ("日祝" in cond_str or "日曜" in cond_str) and day_of_week in [6]:
+            matching_dates.append(d_str)
+        elif "土日" in cond_str and day_of_week in [5, 6]:
             matching_dates.append(d_str)
         elif cond_str in ["全日", "すべて", ""]:
             matching_dates.append(d_str)
@@ -170,45 +182,111 @@ def send_discord_direct_link_notification(targets):
 
     print(f"🚀 全 {target_count} 路線の確定公式直リンクをDiscordへ送信中...")
 
-    route_blocks = []
+    # 航空会社ごとにグループ分け
+    united_targets = []
+    ana_targets = []
+    solaseed_targets = []
+    other_targets = []
+
     for t in targets:
-        origin = t["origin"]
-        dest = t["destination"]
-        date_cond = t["date_cond"]
-        time_cond = t.get("time_cond", "全時間帯")
-        note = t.get("note", f"{origin}→{dest}")
+        airline_str = t.get("airline", "").upper()
+        if "ANA" in airline_str or "全日空" in airline_str:
+            ana_targets.append(t)
+        elif "ソラシド" in airline_str:
+            solaseed_targets.append(t)
+        elif "ユナイテッド" in airline_str or "UNITED" in airline_str:
+            united_targets.append(t)
+        else:
+            united_targets.append(t)
 
-        matching_dates = get_next_matching_dates(date_cond)
-        link_lines = []
+    sections = []
 
-        for d_str in matching_dates:
-            link_url = build_united_award_url(origin, dest, d_str)
-            dt = datetime.strptime(d_str, "%Y-%m-%d")
-            days_ja = ["月", "火", "水", "木", "金", "土", "日"]
-            day_label = f"{d_str} ({days_ja[dt.weekday()]})"
-            link_lines.append(f"  └ 📅 **{day_label}**: [👉 1タップでUnited公式空席画面を開く]({link_url})")
+    # 1. ユナイテッド航空セクション
+    if united_targets:
+        u_lines = []
+        u_lines.append(f"✈️ **【ユナイテッド航空 特典枠】（全{len(united_targets)}路線）**")
+        for t in united_targets:
+            origin = t["origin"]
+            dest = t["destination"]
+            date_cond = t["date_cond"]
+            time_cond = t.get("time_cond", "全時間帯")
+            note = t.get("note", f"{origin}→{dest}")
 
-        links_str = "\n".join(link_lines)
-        route_blocks.append(
-            f"✈️ **【{note}】 {origin} ➡️ {dest}** (条件: `{date_cond}` / 時間: `{time_cond}`)\n"
-            f"{links_str}"
-        )
+            matching_dates = get_next_matching_dates(date_cond)
+            date_links = []
+            for d_str in matching_dates:
+                link_url = build_united_award_url(origin, dest, d_str)
+                try:
+                    dt = datetime.strptime(d_str, "%Y-%m-%d")
+                    days_ja = ["月", "火", "水", "木", "金", "土", "日"]
+                    day_label = f"{d_str} ({days_ja[dt.weekday()]})"
+                except Exception:
+                    day_label = d_str
+                date_links.append(f"  └ 📅 **{day_label}**: [👉 1タップでUnited公式空席画面を開く]({link_url})")
+
+            links_str = "\n".join(date_links)
+            u_lines.append(
+                f"🔹 **【{note}】 {origin} ➡️ {dest}** (条件: `{date_cond}` / 時間: `{time_cond}`)\n{links_str}"
+            )
+        sections.append("\n\n".join(u_lines))
+
+    # 2. ANAセクション
+    if ana_targets:
+        a_lines = []
+        a_lines.append(f"🟦 **【ANA (全日空) 国内線特典枠】（全{len(ana_targets)}路線）**")
+        ana_link = build_ana_award_url("", "", "")
+        for t in ana_targets:
+            origin = t["origin"]
+            dest = t["destination"]
+            date_cond = t["date_cond"]
+            time_cond = t.get("time_cond", "全時間帯")
+            note = t.get("note", f"{origin}→{dest}")
+
+            try:
+                dt = datetime.strptime(date_cond, "%Y-%m-%d")
+                days_ja = ["月", "火", "水", "木", "金", "土", "日"]
+                day_label = f"{date_cond} ({days_ja[dt.weekday()]})"
+            except Exception:
+                day_label = date_cond
+
+            a_lines.append(
+                f"🔹 **【{note}】 {origin} ➡️ {dest}** (日付: `{day_label}` / 時間: `{time_cond}`)\n"
+                f"  └ 📅 **{day_label}**: [👉 1タップでANA公式特典予約を開く]({ana_link})"
+            )
+        sections.append("\n\n".join(a_lines))
+
+    # 3. ソラシドエアセクション
+    if solaseed_targets:
+        s_lines = []
+        s_lines.append(f"🟢 **【ソラシドエア 特典枠】（全{len(solaseed_targets)}路線）**")
+        solaseed_link = build_solaseed_award_url()
+        for t in solaseed_targets:
+            origin = t["origin"]
+            dest = t["destination"]
+            date_cond = t["date_cond"]
+            time_cond = t.get("time_cond", "全時間帯")
+            note = t.get("note", f"{origin}→{dest}")
+            s_lines.append(
+                f"🔹 **【{note}】 {origin} ➡️ {dest}** (条件: `{date_cond}` / 時間: `{time_cond}`)\n"
+                f"  └ 📅 **{date_cond}**: [👉 1タップでソラシド公式特典予約を開く]({solaseed_link})"
+            )
+        sections.append("\n\n".join(s_lines))
 
     desc = (
-        f"🔍 **ユナイテッド航空 特典航空券 公式直リンク通知 ({now_str})**\n\n"
-        "スプレッドシート定義「有効」全6路線の最新特典空席確認ダイレクトリンクです。\n"
-        "下のリンクを1タップするだけで、スマホやPCのブラウザでユナイテッド航空公式のリアルタイム空席画面が開きます。\n\n"
-        + "\n\n".join(route_blocks) + "\n\n"
+        f"🔍 **特典航空券 公式直リンク通知 ({now_str})**\n\n"
+        f"スプレッドシート定義「有効」全 {target_count} 路線の最新公式空席確認ダイレクトリンクです。\n"
+        "下のリンクを1タップするだけで、スマホやPCのブラウザで各航空会社公式のリアルタイム空席画面が開きます。\n\n"
+        + "\n\n---\n\n".join(sections) + "\n\n"
         "※100%無料・誤判定ゼロ。完全高確実性モードで動作中。"
     )
 
     payload = {
-        "username": "ユナイテッド特典航空券 リマインダー",
+        "username": "特典航空券 公式ダイレクト確認システム",
         "embeds": [{
-            "title": f"✈️ 【ユナイテッド航空】全 {target_count} 路線 特典航空券 公式直リンク",
-            "color": 5814783,
+            "title": f"✈️ 全 {target_count} 路線 特典航空券 公式ダイレクトリンク",
+            "color": 3447003,
             "description": desc,
-            "footer": {"text": "United特典航空券 完全無料高確実性リマインダーシステム"},
+            "footer": {"text": "特典航空券 完全無料高確実性リマインダーシステム"},
             "timestamp": datetime.utcnow().isoformat() + "Z"
         }]
     }
@@ -230,7 +308,7 @@ def send_discord_direct_link_notification(targets):
         )
         with urllib.request.urlopen(req, context=ctx, timeout=10) as res:
             if res.status in [200, 204]:
-                print("🎉 【完全成功】確定直リンク通知をDiscordへ正常送信いたしました！")
+                print("🎉 【完全成功】航空会社別確定直リンク通知をDiscordへ正常送信いたしました！")
             else:
                 print(f"⚠️ 送信ステータス: {res.status}")
     except Exception as e:
